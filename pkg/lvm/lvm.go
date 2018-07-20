@@ -45,6 +45,7 @@ const ErrTagHasInvalidChars = simpleError("lvm: Tag must consist of only [A-Za-z
 
 type PhysicalVolume struct {
 	dev string
+	vg  string
 }
 
 // Remove removes the physical volume.
@@ -61,6 +62,11 @@ func (pv *PhysicalVolume) Check() error {
 		return err
 	}
 	return nil
+}
+
+// GroupName return volume group name of the pv.
+func (pv *PhysicalVolume) GroupName() string {
+	return pv.vg
 }
 
 type VolumeGroup struct {
@@ -458,6 +464,14 @@ func VGScan(name string) error {
 	return run("vgscan", nil, args...)
 }
 
+// NewVolumeGroup return a VolumeGroup instance,
+// but does not care about its practical state.
+func NewVolumeGroup(name string) *VolumeGroup {
+	return &VolumeGroup{
+		name: name,
+	}
+}
+
 // CreateVolumeGroup creates a new volume group.
 func CreateVolumeGroup(
 	name string,
@@ -593,7 +607,7 @@ func CreatePhysicalVolume(dev string) (*PhysicalVolume, error) {
 	if err := run("pvcreate", nil, dev); err != nil {
 		return nil, fmt.Errorf("lvm: CreatePhysicalVolume: %v", err)
 	}
-	return &PhysicalVolume{dev}, nil
+	return &PhysicalVolume{dev: dev}, nil
 }
 
 type pvsOutput struct {
@@ -614,7 +628,7 @@ func ListPhysicalVolumes() ([]*PhysicalVolume, error) {
 	var pvs []*PhysicalVolume
 	for _, report := range result.Report {
 		for _, pv := range report.Pv {
-			pvs = append(pvs, &PhysicalVolume{pv.Name})
+			pvs = append(pvs, &PhysicalVolume{dev: pv.Name, vg: pv.VgName})
 		}
 	}
 	return pvs, nil
@@ -631,7 +645,7 @@ func LookupPhysicalVolume(name string) (*PhysicalVolume, error) {
 	}
 	for _, report := range result.Report {
 		for _, pv := range report.Pv {
-			return &PhysicalVolume{pv.Name}, nil
+			return &PhysicalVolume{dev: pv.Name, vg: pv.VgName}, nil
 		}
 	}
 	return nil, ErrPhysicalVolumeNotFound
