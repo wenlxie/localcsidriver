@@ -10,20 +10,27 @@ import (
 
 type LvmBackend struct {
 	*lvm.VolumeGroup
+	tags         []string
 	discoveryDir string
 	mounter      mount.Interface
 }
 
-func New(groupName, discoveryDir string) *LvmBackend {
+func NewLvmBackend(groupName, discoveryDir string, tags []string, mounter mount.Interface) (*LvmBackend, error) {
+	for _, tag := range tags {
+		if err := lvm.ValidateTag(tag); err != nil {
+			return nil, fmt.Errorf("invalid tag %s: %v", tag, err)
+		}
+	}
 	return &LvmBackend{
 		VolumeGroup:  lvm.NewVolumeGroup(groupName),
 		discoveryDir: discoveryDir,
-		mounter:      mount.New("" /* default mount path */),
-	}
+		tags:         tags,
+		mounter:      mounter,
+	}, nil
 }
 
-func (l *LvmBackend) CreateVolume(name string, sizeInBytes uint64, tags []string) (Volume, error) {
-	return l.CreateLogicalVolume(name, sizeInBytes, tags)
+func (l *LvmBackend) CreateVolume(name string, sizeInBytes uint64) (Volume, error) {
+	return l.CreateLogicalVolume(name, sizeInBytes, l.tags)
 }
 
 func (l *LvmBackend) LookupVolume(name string) (Volume, error) {
@@ -59,7 +66,7 @@ func (l *LvmBackend) Sync() error {
 	}
 
 	// Find and record the devices that exported via files in discovery path.
-	// Files that has not according device found would be ignored.
+	// Files that has no according device found would be ignored.
 	devices := []string{}
 	for _, file := range files {
 		for _, mp := range mountPoints {
@@ -79,24 +86,39 @@ func (l *LvmBackend) Sync() error {
 				return fmt.Errorf("error looking up physical volume for %s: %v", device, err)
 			}
 			// PV not exist, create one
-			if _, err := lvm.CreatePhysicalVolume(device); err != nil {
+			newPv, err := lvm.CreatePhysicalVolume(device)
+			if err != nil {
 				return fmt.Errorf("error creating physical volume for %s: %v", device, err)
 			}
-			devicesToAdd = append(devicesToAdd, device)
+			devicesToAdd = append(devicesToAdd, newPv)
 		} else {
 			groupName := pv.GroupName()
 			if groupName == "" {
 				// PV need to be added.
-				devicesToAdd = append(devicesToAdd, device)
+				devicesToAdd = append(devicesToAdd, pv)
+				continue
 			}
 
-			if groupName != l.VolumeGroup.Name() {
-				fmt.Errorf("device is expected to be added to group %s, but turned out added to group %s", device, l.VolumeGroup.Name(), groupName)
+			if groupName != l.Name() {
+				fmt.Errorf("device %s is expected to be added to group %s, but turned out added to group %s", device, l.VolumeGroup.Name(), groupName)
 			}
 		}
 	}
 
-	if l.VolumeGroup == nil {
-		lvm.CreateVolumeGroup()
+	_, err = lvm.LookupVolumeGroup(l.Name())
+	if err != nil {
+		if err != lvm.ErrVolumeGroupNotFound {
+			return fmt.Errorf("error looking up volume group %s: %v", l.Name(), err)
+		}
+
+		// Group not exist, create it.
+		if _, err := lvm.CreateVolumeGroup(l.Name(), devicesToAdd, l.tags); err != nil {
+			return fmt.Errorf("error creating volume group %s: %v", l.Name(), err)
+		}
+	} else {
+		// Extend existing group.
+		return lvm.ExtendVolumeGroup(l.Name(), devicesToAdd)
 	}
+
+	return nil
 }

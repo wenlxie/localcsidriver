@@ -15,7 +15,7 @@ type StorageBackend interface {
 	Name() string
 	BytesTotal() (uint64, error)
 	BytesFree() (uint64, error)
-	CreateVolume(name string, sizeInBytes uint64, tags []string) (Volume, error)
+	CreateVolume(name string, sizeInBytes uint64) (Volume, error)
 	LookupVolume(name string) (Volume, error)
 	ListVolumeNames() ([]string, error)
 	DeleteVolume(volName string) error

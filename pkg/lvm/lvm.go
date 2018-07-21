@@ -509,6 +509,34 @@ func CreateVolumeGroup(
 	return &VolumeGroup{name}, nil
 }
 
+// ExtendVolumeGroup add given pvs into the group.
+func ExtendVolumeGroup(
+	name string,
+	pvs []*PhysicalVolume) error {
+	var args []string
+	if _, err := LookupVolumeGroup(name); err != nil {
+		return err
+	}
+	args = append(args, name)
+	for _, pv := range pvs {
+		args = append(args, pv.dev)
+	}
+	if err := run("vgextend", nil, args...); err != nil {
+		return err
+	}
+	// Perform a best-effort scan to trigger a lvmetad cache refresh.
+	// We ignore errors as for better or worse, the volume group now exists.
+	// Without this lvmetad can fail to pickup newly created volume groups.
+	// See https://bugzilla.redhat.com/show_bug.cgi?id=837599
+	if err := PVScan(""); err != nil {
+		log.Printf("error during pvscan: %v", err)
+	}
+	if err := VGScan(""); err != nil {
+		log.Printf("error during vgscan: %v", err)
+	}
+	return nil
+}
+
 // ValidateVolumeGroupName validates a volume group name. A valid volume group
 // name can consist of a limited range of characters only. The allowed
 // characters are [A-Za-z0-9_+.-].

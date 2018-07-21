@@ -10,13 +10,6 @@ var ErrRemovingMode = status.Error(
 	codes.FailedPrecondition,
 	"This service is running in 'remove volume group' mode.")
 
-func (s *Server) validateRemoving() error {
-	if s.removingVolumeGroup {
-		return ErrRemovingMode
-	}
-	return nil
-}
-
 var ErrMissingVolumeCapabilities = status.Error(codes.InvalidArgument, "The volume_capabilities field must be specified.")
 
 func (s *Server) validateVolumeCapabilities(volumeCapabilities []*csi.VolumeCapability) error {
@@ -111,9 +104,6 @@ var ErrMissingName = status.Error(codes.InvalidArgument, "The name field must be
 var ErrUnsupportedFilesystem = status.Error(codes.FailedPrecondition, "The requested filesystem type is unknown.")
 
 func (s *Server) validateCreateVolumeRequest(request *csi.CreateVolumeRequest) error {
-	if err := s.validateRemoving(); err != nil {
-		return err
-	}
 	name := request.GetName()
 	if name == "" {
 		return ErrMissingName
@@ -126,6 +116,7 @@ func (s *Server) validateCreateVolumeRequest(request *csi.CreateVolumeRequest) e
 	if err := s.validateVolumeCapabilities(request.GetVolumeCapabilities()); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -151,9 +142,6 @@ func (s *Server) validateCapacityRange(capacityRange *csi.CapacityRange) error {
 var ErrMissingVolumeId = status.Error(codes.InvalidArgument, "The volume_id field must be specified.")
 
 func (s *Server) validateDeleteVolumeRequest(request *csi.DeleteVolumeRequest) error {
-	if err := s.validateRemoving(); err != nil {
-		return err
-	}
 	volumeId := request.GetVolumeId()
 	if volumeId == "" {
 		return ErrMissingVolumeId
@@ -162,9 +150,6 @@ func (s *Server) validateDeleteVolumeRequest(request *csi.DeleteVolumeRequest) e
 }
 
 func (s *Server) validateValidateVolumeCapabilitiesRequest(request *csi.ValidateVolumeCapabilitiesRequest) error {
-	if err := s.validateRemoving(); err != nil {
-		return err
-	}
 	volumeId := request.GetVolumeId()
 	if volumeId == "" {
 		return ErrMissingVolumeId
@@ -199,13 +184,11 @@ func (s *Server) validateControllerGetCapabilitiesRequest(request *csi.Controlle
 // NodeService RPCs
 
 var ErrMissingTargetPath = status.Error(codes.InvalidArgument, "The target_path field must be specified.")
+var ErrMissingStagingTargetPath = status.Error(codes.InvalidArgument, "The staging_target_path field must be specified.")
 var ErrMissingVolumeCapability = status.Error(codes.InvalidArgument, "The volume_capability field must be specified.")
 var ErrSpecifiedPublishInfo = status.Error(codes.InvalidArgument, "The publish_volume_info field must not be specified.")
 
 func (s *Server) validateNodePublishVolumeRequest(request *csi.NodePublishVolumeRequest) error {
-	if err := s.validateRemoving(); err != nil {
-		return err
-	}
 	volumeId := request.GetVolumeId()
 	if volumeId == "" {
 		return ErrMissingVolumeId
@@ -232,9 +215,6 @@ func (s *Server) validateNodePublishVolumeRequest(request *csi.NodePublishVolume
 }
 
 func (s *Server) validateNodeUnpublishVolumeRequest(request *csi.NodeUnpublishVolumeRequest) error {
-	if err := s.validateRemoving(); err != nil {
-		return err
-	}
 	volumeId := request.GetVolumeId()
 	if volumeId == "" {
 		return ErrMissingVolumeId
@@ -242,6 +222,43 @@ func (s *Server) validateNodeUnpublishVolumeRequest(request *csi.NodeUnpublishVo
 	targetPath := request.GetTargetPath()
 	if targetPath == "" {
 		return ErrMissingTargetPath
+	}
+	return nil
+}
+
+func (s *Server) validateNodeStageVolumeRequest(request *csi.NodeStageVolumeRequest) error {
+	volumeId := request.GetVolumeId()
+	if volumeId == "" {
+		return ErrMissingVolumeId
+	}
+	publishInfo := request.GetPublishInfo()
+	if publishInfo != nil {
+		return ErrSpecifiedPublishInfo
+	}
+	targetPath := request.GetStagingTargetPath()
+	if targetPath == "" {
+		return ErrMissingStagingTargetPath
+	}
+	volumeCapability := request.GetVolumeCapability()
+	if volumeCapability == nil {
+		return ErrMissingVolumeCapability
+	} else {
+		const treatUnsupportedFsAsError = false
+		if err := s.validateVolumeCapability(volumeCapability, treatUnsupportedFsAsError, false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Server) validateNodeUnstageVolumeRequest(request *csi.NodeUnstageVolumeRequest) error {
+	volumeId := request.GetVolumeId()
+	if volumeId == "" {
+		return ErrMissingVolumeId
+	}
+	targetPath := request.GetStagingTargetPath()
+	if targetPath == "" {
+		return ErrMissingStagingTargetPath
 	}
 	return nil
 }
