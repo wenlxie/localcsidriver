@@ -8,6 +8,15 @@
   version = "v0.3.0"
 
 [[projects]]
+  name = "k8s.io/kubernetes"
+  packages = [
+    "pkg/util/mount",
+    "pkg/volume/util"
+  ]
+  revision = "37555e6d24c2f951c40660ea59a80fa251982005"
+  version = "v1.10.0-beta.1"
+
+[[projects]]
   branch = "master"
   name = "github.com/golang/protobuf"
   packages = ["proto","protoc-gen-go","protoc-gen-go/descriptor","protoc-gen-go/generator","protoc-gen-go/grpc","protoc-gen-go/plugin","ptypes","ptypes/any","ptypes/duration","ptypes/timestamp"]
