@@ -472,6 +472,19 @@ func (s *Server) ControllerUnpublishVolume(
 	return nil, ErrCallNotImplemented
 }
 
+func (s *Server) CreateSnapshot(context.Context, *csi.CreateSnapshotRequest) (*csi.CreateSnapshotResponse, error) {
+	log.Printf("CreateSnapshot not supported")
+	return nil, ErrCallNotImplemented
+}
+func (s *Server) DeleteSnapshot(context.Context, *csi.DeleteSnapshotRequest) (*csi.DeleteSnapshotResponse, error) {
+	log.Printf("DeleteSnapshot not supported")
+	return nil, ErrCallNotImplemented
+}
+func (s *Server) ListSnapshots(context.Context, *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
+	log.Printf("ListSnapshots not supported")
+	return nil, ErrCallNotImplemented
+}
+
 var ErrMismatchedFilesystemType = status.Error(
 	codes.InvalidArgument,
 	"The requested fs_type does not match the existing filesystem on the volume.")
@@ -853,6 +866,11 @@ func (s *Server) NodeGetId(
 	ctx context.Context,
 	request *csi.NodeGetIdRequest) (*csi.NodeGetIdResponse, error) {
 	log.Printf("NodeGetId not supported")
+	return nil, ErrCallNotImplemented
+}
+
+func (s *Server) NodeGetInfo(context.Context, *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
+	log.Printf("NodeGetInfo not supported")
 	return nil, ErrCallNotImplemented
 }
 

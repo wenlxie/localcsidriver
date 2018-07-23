@@ -19,7 +19,6 @@ import (
 func main() {
 	// Configure flags
 	configPathF := flag.String("config-path", "/etc/config/driver.conf", "The file path of dirver config")
-	nodeNameF := flag.String("node-name", "", "node name to construct access topology for created volumes")
 	socketFileF := flag.String("unix-addr", "unix://tmp/local-csi.sock", "The path to the listening unix socket file")
 	socketFileEnvF := flag.String("unix-addr-env", "", "An optional environment variable from which to read the unix-addr")
 	flag.Parse()
