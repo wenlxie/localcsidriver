@@ -4,14 +4,21 @@
 [[projects]]
   name = "github.com/container-storage-interface/spec"
   packages = ["lib/go","lib/go/csi/v0"]
-  revision = "35d9f9d77954980e449e52c3f3e43c21bd8171f5"
-  version = "v0.2.0"
+  revision = "2178fdeea87f1150a17a63252eee28d4d8141f72"
+  version = "v0.3.0"
 
 [[projects]]
   branch = "master"
   name = "github.com/golang/protobuf"
   packages = ["proto","protoc-gen-go","protoc-gen-go/descriptor","protoc-gen-go/generator","protoc-gen-go/grpc","protoc-gen-go/plugin","ptypes","ptypes/any","ptypes/duration","ptypes/timestamp"]
-  revision = "17ce1425424ab154092bbb43af630bd647f3bb0d"
+  revision = "b4deda0973fb4c70b50d226b1af49f3da59f5265"
+  version = "v1.1.0"
+
+[[projects]]
+  name = "github.com/ghodss/yaml"
+  packages = ["."]
+  revision = "0ca9ea5df5451ffdf184b4428c902747c2c11cd7"
+  version = "v1.0.0"
 
 [[projects]]
   name = "github.com/google/uuid"
