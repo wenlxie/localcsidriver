@@ -9,7 +9,6 @@ type Volume interface {
 	Tags() ([]string, error)
 }
 
-
 // StorageBackend is used to de-couple local storage manager and backend storage.
 type StorageBackend interface {
 	Name() string

@@ -19,18 +19,20 @@ import (
 	"golang.org/x/net/context"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	volumeutil "k8s.io/kubernetes/pkg/volume/util"
 	"k8s.io/kubernetes/pkg/util/mount"
+	volumeutil "k8s.io/kubernetes/pkg/volume/util"
 )
 
 const PluginName = "io.kubernetes.storage.localvolume"
 const PluginVersion = "0.2.0"
 const DefaultVolumeSize = 10 << 30
 const LvmBackendSelectionKey = "volume-group"
+
 // Key specified in field "VolumeAttributes" to indicate source path of the volume.
 // e.g volume-path=/etc/vg1/lv1
 // Users need to manually specify the field for static volumes.
 const VolumePathKey = "volume-path"
+
 // TODO: should we make the key more general,
 // and convert it on the provisioner side?
 const HostnameKey = "kubernetes.io/hostname"
@@ -122,7 +124,7 @@ func (s *Server) Setup(stopCh chan struct{}) error {
 		defer ticker.Stop()
 		for {
 			select {
-			case <- stopCh:
+			case <-stopCh:
 				return
 			case <-ticker.C:
 				for _, storageBackend := range s.backends {
@@ -146,9 +148,9 @@ func (s *Server) GetPluginInfo(
 		return nil, err
 	}
 	response := &csi.GetPluginInfoResponse{
-		Name: PluginName,
+		Name:          PluginName,
 		VendorVersion: PluginVersion,
-		Manifest: nil,
+		Manifest:      nil,
 	}
 
 	return response, nil
@@ -224,7 +226,7 @@ func (s *Server) CreateVolume(
 		response := &csi.CreateVolumeResponse{
 			Volume: &csi.Volume{
 				CapacityBytes: int64(vol.SizeInBytes()),
-				Id: vol.Name(),
+				Id:            vol.Name(),
 				Attributes: map[string]string{
 					VolumePathKey: volPath,
 				},
@@ -286,7 +288,7 @@ func (s *Server) CreateVolume(
 	response := &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
 			CapacityBytes: int64(vol.SizeInBytes()),
-			Id: vol.Name(),
+			Id:            vol.Name(),
 			Attributes: map[string]string{
 				VolumePathKey: volPath,
 			},
@@ -538,7 +540,7 @@ func (s *Server) ValidateVolumeCapabilities(
 	}
 	response := &csi.ValidateVolumeCapabilitiesResponse{
 		Supported: true,
-		Message: "",
+		Message:   "",
 	}
 	return response, nil
 }
@@ -571,14 +573,14 @@ func (s *Server) ListVolumes(
 		}
 		info := &csi.Volume{
 			CapacityBytes: int64(vol.SizeInBytes()),
-			Id: vol.Name(),
+			Id:            vol.Name(),
 		}
 		log.Printf("Found volume %v (%v bytes)", volname, vol.SizeInBytes())
 		entry := &csi.ListVolumesResponse_Entry{Volume: info}
 		entries = append(entries, entry)
 	}
 	response := &csi.ListVolumesResponse{
-		Entries: entries,
+		Entries:   entries,
 		NextToken: "",
 	}
 	return response, nil
@@ -690,20 +692,20 @@ func (s *Server) NodeStageVolume(
 
 	// Get volume path
 	/*
-	// Get Backend via volume ID
-	storageBackend, err := s.getBackendFromVolumeID(id)
-	if err != nil {
-		return nil, err
-	}
+		// Get Backend via volume ID
+		storageBackend, err := s.getBackendFromVolumeID(id)
+		if err != nil {
+			return nil, err
+		}
 
-	vol, err := storageBackend.LookupVolume(id)
-	if err != nil {
-		return nil, err
-	}
-	volPath, err := vol.Path()
-	if err != nil {
-		return nil, err
-	}
+		vol, err := storageBackend.LookupVolume(id)
+		if err != nil {
+			return nil, err
+		}
+		volPath, err := vol.Path()
+		if err != nil {
+			return nil, err
+		}
 	*/
 
 	// As path of static volumes cannot be found via storage backend,
@@ -712,7 +714,6 @@ func (s *Server) NodeStageVolume(
 	if volPath == "" {
 		return nil, fmt.Errorf("failed to get volume path from stating request")
 	}
-
 
 	// Volume Mount
 	if notMnt {
@@ -798,7 +799,6 @@ func (s *Server) NodePublishVolume(
 	volumeID := request.GetVolumeId()
 	mountFlags := request.GetVolumeCapability().GetMount().GetMountFlags()
 
-
 	options := []string{"bind"}
 	options = append(options, mountFlags...)
 	if readonly {
@@ -853,7 +853,7 @@ func (s *Server) NodeUnpublishVolume(
 		return nil, err
 	}
 
-	err :=volumeutil.UnmountMountPoint(request.GetTargetPath(), s.mounter, true)
+	err := volumeutil.UnmountMountPoint(request.GetTargetPath(), s.mounter, true)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
