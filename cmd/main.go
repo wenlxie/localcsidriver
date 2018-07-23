@@ -12,8 +12,8 @@ import (
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi/v0"
 	"github.com/kubernetes-csi/localcsidriver/pkg/config"
-	"github.com/kubernetes-csi/localcsidriver/pkg/localvolume"
 	"github.com/kubernetes-csi/localcsidriver/pkg/lvm"
+	"github.com/kubernetes-csi/localcsidriver/pkg/server"
 )
 
 func main() {
@@ -26,7 +26,7 @@ func main() {
 	logprefix := fmt.Sprintf("[%s]", "CSI local driver")
 	logflags := log.LstdFlags | log.Lshortfile
 	logger := log.New(os.Stderr, logprefix, logflags)
-	localvolume.SetLogger(logger)
+	server.SetLogger(logger)
 	lvm.SetLogger(logger)
 	// Determine listen address.
 	if *socketFileF != "" && *socketFileEnvF != "" {
@@ -48,8 +48,8 @@ func main() {
 	var grpcOpts []grpc.ServerOption
 	grpcOpts = append(grpcOpts,
 		grpc.UnaryInterceptor(
-			localvolume.ChainUnaryServer(
-				localvolume.LoggingInterceptor(),
+			server.ChainUnaryServer(
+				server.LoggingInterceptor(),
 			),
 		),
 	)
@@ -60,7 +60,7 @@ func main() {
 		log.Fatalf("Error loading driver config: %v", err)
 	}
 
-	s, err := localvolume.NewServer(driverConfig)
+	s, err := server.New(driverConfig)
 	if err != nil {
 		log.Fatalf("Error initializing localvolume plugin: %v", err)
 	}

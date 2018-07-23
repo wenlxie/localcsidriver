@@ -1,4 +1,4 @@
-package localvolume
+package server
 
 import (
 	"bufio"
@@ -2608,7 +2608,7 @@ func prepareSetupTest(vgname string, pvnames []string, serverOpts ...ServerOpt) 
 		return nil
 	})
 
-	s := NewServer(vgname, pvnames, "xfs", serverOpts...)
+	s := New(vgname, pvnames, "xfs", serverOpts...)
 	var opts []grpc.ServerOption
 	opts = append(opts,
 		grpc.UnaryInterceptor(

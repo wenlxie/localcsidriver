@@ -1,4 +1,4 @@
-package localvolume
+package server
 
 import (
 	csi "github.com/container-storage-interface/spec/lib/go/csi/v0"

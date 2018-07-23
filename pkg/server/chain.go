@@ -3,7 +3,7 @@
 
 // gRPC Server Interceptor chaining middleware.
 
-package localvolume
+package server
 
 import (
 	"golang.org/x/net/context"

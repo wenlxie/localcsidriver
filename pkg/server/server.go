@@ -1,4 +1,4 @@
-package localvolume
+package server
 
 import (
 	"bytes"
@@ -51,12 +51,12 @@ type Server struct {
 	mounter              *mount.SafeFormatAndMount
 }
 
-// NewServer returns a new Server that will manage the multi LVM volume
+// New returns a new Server that will manage the multi LVM volume
 // groups. It accepts a variadic list of ServerOpt with which the server's
 // default options can be overwritten. The Setup method must be called before
 // any other further method calls are performed in order to setup the
 // volume groups.
-func NewServer(config *config.DriverConfig) (*Server, error) {
+func New(config *config.DriverConfig) (*Server, error) {
 	s := &Server{
 		defaultVolumeSize:    config.DefaultVolumeSize,
 		supportedFilesystems: map[string]string{},
