@@ -186,6 +186,7 @@ func (s *Server) validateControllerGetCapabilitiesRequest(request *csi.Controlle
 var ErrMissingTargetPath = status.Error(codes.InvalidArgument, "The target_path field must be specified.")
 var ErrMissingStagingTargetPath = status.Error(codes.InvalidArgument, "The staging_target_path field must be specified.")
 var ErrMissingVolumeCapability = status.Error(codes.InvalidArgument, "The volume_capability field must be specified.")
+var ErrMissingVolumeAttributes = status.Error(codes.InvalidArgument, "The attributes field must be specified.")
 var ErrSpecifiedPublishInfo = status.Error(codes.InvalidArgument, "The publish_volume_info field must not be specified.")
 
 func (s *Server) validateNodePublishVolumeRequest(request *csi.NodePublishVolumeRequest) error {
@@ -248,6 +249,11 @@ func (s *Server) validateNodeStageVolumeRequest(request *csi.NodeStageVolumeRequ
 			return err
 		}
 	}
+	attributes := request.GetVolumeAttributes()
+	if attributes == nil {
+		return ErrMissingVolumeAttributes
+	}
+
 	return nil
 }
 

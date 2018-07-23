@@ -9,11 +9,13 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
+	"time"
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi/v0"
 	"github.com/kubernetes-csi/localcsidriver/pkg/backend"
 	"github.com/kubernetes-csi/localcsidriver/pkg/config"
 	"github.com/kubernetes-csi/localcsidriver/pkg/lvm"
+	"github.com/kubernetes-csi/localcsidriver/pkg/util"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -25,6 +27,13 @@ const PluginName = "io.kubernetes.storage.localvolume"
 const PluginVersion = "0.2.0"
 const DefaultVolumeSize = 10 << 30
 const LvmBackendSelectionKey = "volume-group"
+// Key specified in field "VolumeAttributes" to indicate source path of the volume.
+// e.g volume-path=/etc/vg1/lv1
+// Users need to manually specify the field for static volumes.
+const VolumePathKey = "volume-path"
+// TODO: should we make the key more general,
+// and convert it on the provisioner side?
+const HostnameKey = "kubernetes.io/hostname"
 
 type Server struct {
 	backends map[string]backend.StorageBackend
@@ -36,6 +45,7 @@ type Server struct {
 	backendSelectionKey  string
 	defaultVolumeSize    uint64
 	supportedFilesystems map[string]string
+	nodeName             string
 	mounter              *mount.SafeFormatAndMount
 }
 
@@ -46,10 +56,25 @@ type Server struct {
 // volume groups.
 func NewServer(config *config.DriverConfig) (*Server, error) {
 	s := &Server{
-		defaultVolumeSize: config.DefaultVolumeSize,
+		defaultVolumeSize:    config.DefaultVolumeSize,
 		supportedFilesystems: map[string]string{},
+		nodeName:             config.NodeName,
 		backends:             map[string]backend.StorageBackend{},
 		mounter:              &mount.SafeFormatAndMount{Interface: mount.New(""), Exec: mount.NewOsExec()},
+	}
+
+	if s.nodeName == "" {
+		// Try to get node name from env if not set.
+		s.nodeName = os.Getenv("NODE_NAME")
+		if s.nodeName == "" {
+			// Take hostname as node name if it's neither set via flag, nor set via env.
+			// This way, users must ensure that node labels of CO side is same to hostname.
+			var err error
+			s.nodeName, err = os.Hostname()
+			if err != nil {
+				return nil, fmt.Errorf("failed to get hostname of the node: %v", err)
+			}
+		}
 	}
 
 	supportedFilesystems := strings.Split(config.SupportedFilesystems, ",")
@@ -59,7 +84,7 @@ func NewServer(config *config.DriverConfig) (*Server, error) {
 	// Take the first one as default filesystem.
 	s.supportedFilesystems[""] = supportedFilesystems[0]
 
-	switch config.StorageBackend {
+	switch config.BackendType {
 	case "lvm":
 		s.backendSelectionKey = LvmBackendSelectionKey
 		for index, group := range config.LvmConfig {
@@ -75,7 +100,7 @@ func NewServer(config *config.DriverConfig) (*Server, error) {
 			}
 		}
 	default:
-		return nil, fmt.Errorf("%s not supported for now", config.StorageBackend)
+		return nil, fmt.Errorf("%s not supported for now", config.BackendType)
 	}
 
 	log.Printf("NewServer: %v", s)
@@ -84,13 +109,30 @@ func NewServer(config *config.DriverConfig) (*Server, error) {
 }
 
 // Setup calls sync func of the backends in server,
-// to keep it up-to-date.
-func (s *Server) Setup() error {
+// to keep things up-to-date.
+func (s *Server) Setup(stopCh chan struct{}) error {
 	for _, storageBackend := range s.backends {
 		if err := storageBackend.Sync(); err != nil {
 			return fmt.Errorf("error syncing %s: %v", storageBackend.Name(), err)
 		}
 	}
+
+	go func() {
+		ticker := time.NewTicker(120 * time.Second) // TODO: make this configurable ?
+		defer ticker.Stop()
+		for {
+			select {
+			case <- stopCh:
+				return
+			case <-ticker.C:
+				for _, storageBackend := range s.backends {
+					if err := storageBackend.Sync(); err != nil {
+						log.Printf("Error syncing %s: %v", storageBackend.Name(), err)
+					}
+				}
+			}
+		}
+	}()
 
 	return nil
 }
@@ -103,7 +145,12 @@ func (s *Server) GetPluginInfo(
 	if err := s.validateGetPluginInfoRequest(request); err != nil {
 		return nil, err
 	}
-	response := &csi.GetPluginInfoResponse{PluginName, PluginVersion, nil}
+	response := &csi.GetPluginInfoResponse{
+		Name: PluginName,
+		VendorVersion: PluginVersion,
+		Manifest: nil,
+	}
+
 	return response, nil
 }
 
@@ -169,11 +216,25 @@ func (s *Server) CreateVolume(
 		if err := s.validateExistingVolume(vol, request); err != nil {
 			return nil, err
 		}
+
+		volPath, err := vol.Path()
+		if err != nil {
+			return nil, err
+		}
 		response := &csi.CreateVolumeResponse{
-			&csi.Volume{
-				int64(vol.SizeInBytes()),
-				vol.Name(),
-				nil,
+			Volume: &csi.Volume{
+				CapacityBytes: int64(vol.SizeInBytes()),
+				Id: vol.Name(),
+				Attributes: map[string]string{
+					VolumePathKey: volPath,
+				},
+				AccessibleTopology: []*csi.Topology{
+					{
+						Segments: map[string]string{
+							HostnameKey: s.nodeName,
+						},
+					},
+				},
 			},
 		}
 		return response, nil
@@ -216,11 +277,26 @@ func (s *Server) CreateVolume(
 			"Error in CreateLogicalVolume: err=%v",
 			err)
 	}
+
+	volPath, err := vol.Path()
+	if err != nil {
+		return nil, err
+	}
+
 	response := &csi.CreateVolumeResponse{
-		&csi.Volume{
-			int64(vol.SizeInBytes()),
-			volumeId,
-			nil,
+		Volume: &csi.Volume{
+			CapacityBytes: int64(vol.SizeInBytes()),
+			Id: vol.Name(),
+			Attributes: map[string]string{
+				VolumePathKey: volPath,
+			},
+			AccessibleTopology: []*csi.Topology{
+				{
+					Segments: map[string]string{
+						HostnameKey: s.nodeName,
+					},
+				},
+			},
 		},
 	}
 	return response, nil
@@ -448,8 +524,8 @@ func (s *Server) ValidateVolumeCapabilities(
 		}
 	}
 	response := &csi.ValidateVolumeCapabilitiesResponse{
-		true,
-		"",
+		Supported: true,
+		Message: "",
 	}
 	return response, nil
 }
@@ -481,17 +557,16 @@ func (s *Server) ListVolumes(
 			return nil, ErrVolumeNotFound
 		}
 		info := &csi.Volume{
-			int64(vol.SizeInBytes()),
-			volname,
-			nil,
+			CapacityBytes: int64(vol.SizeInBytes()),
+			Id: vol.Name(),
 		}
 		log.Printf("Found volume %v (%v bytes)", volname, vol.SizeInBytes())
-		entry := &csi.ListVolumesResponse_Entry{info}
+		entry := &csi.ListVolumesResponse_Entry{Volume: info}
 		entries = append(entries, entry)
 	}
 	response := &csi.ListVolumesResponse{
-		entries,
-		"",
+		Entries: entries,
+		NextToken: "",
 	}
 	return response, nil
 }
@@ -513,7 +588,7 @@ func (s *Server) GetCapacity(
 			fstype := mnt.GetFsType()
 			if _, ok := s.supportedFilesystems[fstype]; !ok {
 				// Zero capacity for unsupported filesystem type.
-				response := &csi.GetCapacityResponse{0}
+				response := &csi.GetCapacityResponse{AvailableCapacity: 0}
 				return response, nil
 			}
 		}
@@ -533,7 +608,7 @@ func (s *Server) GetCapacity(
 			err)
 	}
 	log.Printf("BytesToal: %v", bytesToal)
-	response := &csi.GetCapacityResponse{int64(bytesToal)}
+	response := &csi.GetCapacityResponse{AvailableCapacity: int64(bytesToal)}
 	return response, nil
 }
 
@@ -546,9 +621,9 @@ func (s *Server) ControllerGetCapabilities(
 	capabilities := []*csi.ControllerServiceCapability{
 		// CREATE_DELETE_VOLUME
 		{
-			&csi.ControllerServiceCapability_Rpc{
-				&csi.ControllerServiceCapability_RPC{
-					csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME,
+			Type: &csi.ControllerServiceCapability_Rpc{
+				Rpc: &csi.ControllerServiceCapability_RPC{
+					Type: csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME,
 				},
 			},
 		},
@@ -560,22 +635,22 @@ func (s *Server) ControllerGetCapabilities(
 		//
 		// LIST_VOLUMES
 		{
-			&csi.ControllerServiceCapability_Rpc{
-				&csi.ControllerServiceCapability_RPC{
-					csi.ControllerServiceCapability_RPC_LIST_VOLUMES,
+			Type: &csi.ControllerServiceCapability_Rpc{
+				Rpc: &csi.ControllerServiceCapability_RPC{
+					Type: csi.ControllerServiceCapability_RPC_LIST_VOLUMES,
 				},
 			},
 		},
 		// GET_CAPACITY
 		{
-			&csi.ControllerServiceCapability_Rpc{
-				&csi.ControllerServiceCapability_RPC{
-					csi.ControllerServiceCapability_RPC_GET_CAPACITY,
+			Type: &csi.ControllerServiceCapability_Rpc{
+				Rpc: &csi.ControllerServiceCapability_RPC{
+					Type: csi.ControllerServiceCapability_RPC_GET_CAPACITY,
 				},
 			},
 		},
 	}
-	response := &csi.ControllerGetCapabilitiesResponse{capabilities}
+	response := &csi.ControllerGetCapabilitiesResponse{Capabilities: capabilities}
 	return response, nil
 }
 
@@ -590,6 +665,9 @@ func (s *Server) NodeStageVolume(
 
 	targetPath := request.GetStagingTargetPath()
 	fsType := request.GetVolumeCapability().GetMount().GetFsType()
+	if fsType == "" {
+		fsType = s.supportedFilesystems[""]
+	}
 
 	// Verify whether mounted
 	notMnt, err := s.mounter.IsLikelyNotMountPoint(targetPath)
@@ -597,15 +675,14 @@ func (s *Server) NodeStageVolume(
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	id := request.GetVolumeId()
-
+	// Get volume path
+	/*
 	// Get Backend via volume ID
 	storageBackend, err := s.getBackendFromVolumeID(id)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get volume path
 	vol, err := storageBackend.LookupVolume(id)
 	if err != nil {
 		return nil, err
@@ -614,6 +691,15 @@ func (s *Server) NodeStageVolume(
 	if err != nil {
 		return nil, err
 	}
+	*/
+
+	// As path of static volumes cannot be found via storage backend,
+	// we'll need to specify path in volume attributes.
+	volPath := request.GetVolumeAttributes()[VolumePathKey]
+	if volPath == "" {
+		return nil, fmt.Errorf("failed to get volume path from stating request")
+	}
+
 
 	// Volume Mount
 	if notMnt {
@@ -622,14 +708,20 @@ func (s *Server) NodeStageVolume(
 		readonly := request.GetVolumeCapability().GetAccessMode().GetMode() == csi.VolumeCapability_AccessMode_SINGLE_NODE_READER_ONLY
 		if readonly {
 			options = append(options, "ro")
-		} else {
-			options = append(options, "rw")
 		}
 		mountFlags := request.GetVolumeCapability().GetMount().GetMountFlags()
 		options = append(options, mountFlags...)
 
 		// Mount
-		err = s.mounter.FormatAndMount(volPath, targetPath, fsType, options)
+		if util.IsBlock(volPath) {
+			err = s.mounter.FormatAndMount(volPath, targetPath, fsType, options)
+		} else if util.IsDir(volPath) {
+			options = append([]string{"bind"}, options...)
+			err = s.mounter.Mount(volPath, targetPath, fsType, options)
+		} else {
+			err = fmt.Errorf("path %s of volume %s is neither of block nor of filesystem", volPath, request.GetVolumeId())
+		}
+
 		if err != nil {
 			return nil, status.Error(codes.Internal, err.Error())
 		}
@@ -822,7 +914,7 @@ func (s *Server) getBackendFromRequest(request RequestWithParameters) (backend.S
 }
 
 func (s *Server) getBackendFromVolumeID(id string) (backend.StorageBackend, error) {
-	backendKey, err := getBackendFrommVolumeID(id)
+	backendKey, err := getBackendFromVolumeID(id)
 	if err != nil {
 		return nil, err
 	}
@@ -835,8 +927,8 @@ func (s *Server) getBackendFromVolumeID(id string) (backend.StorageBackend, erro
 	return storageBackend, nil
 }
 
-// getBackendFrommVolumeID convert given volume ID into storage backend name and internal ID.
-func getBackendFrommVolumeID(inputID string) (backend string, err error) {
+// getBackendFromVolumeID convert given volume ID into storage backend name and internal ID.
+func getBackendFromVolumeID(inputID string) (backend string, err error) {
 	volumeInfo := strings.Split(inputID, "_")
 	if len(volumeInfo) != 2 {
 		return "", fmt.Errorf("input volume ID is not in format of 'backend_ID' but %s", inputID)

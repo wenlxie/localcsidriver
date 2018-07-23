@@ -1,5 +1,17 @@
 package config
 
+import (
+	"fmt"
+	"io/ioutil"
+
+	"github.com/ghodss/yaml"
+)
+
+const (
+	defaultDefaultFs         = "xfs"
+	defaultDefaultVolumeSize = 10 << 30
+)
+
 // VolumeGroupConfig is config item for a volume group in lvm.
 type VolumeGroupConfig struct {
 	Name string `json:"name" yaml:"name"`
@@ -12,11 +24,10 @@ type VolumeGroupConfig struct {
 }
 
 // DriverConfig defines driver configuration objects.
-// TODO Need to find a way to marshal the struct more efficiently.
 type DriverConfig struct {
 	// Underlying mechanism of the driver.
 	// currently only lvm is supported.
-	StorageBackend string `json:"storageBackend" yaml:"storageBackend"`
+	BackendType string `json:"backendType" yaml:"backendType"`
 	// LvmConfig defines lvm releated configuration.
 	LvmConfig []VolumeGroupConfig `json:"lvmConfig" yaml:"lvmConfig"`
 	// Supported filesystems to format new volumes with
@@ -25,4 +36,34 @@ type DriverConfig struct {
 	// The default volume size in bytes
 	// +optional
 	DefaultVolumeSize uint64 `json:"defaultVolumeSize" yaml:"defaultVolumeSize"`
+	// Node name to construct access topology for created volumes
+	// +optional
+	NodeName string `json:"nodeName" yaml:"nodeName"`
+}
+
+// LoadDriverConfig loads config from given file.
+func LoadDriverConfig(configPath string) (*DriverConfig, error) {
+	driverConfig := &DriverConfig{}
+	fileContents, err := ioutil.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file: %s due to: %v", configPath, err)
+	}
+
+	if err := yaml.Unmarshal(fileContents, driverConfig); err != nil {
+		return nil, fmt.Errorf("fail to Unmarshal yaml due to: %#v", err)
+	}
+
+	initConfigItems(driverConfig)
+
+	return driverConfig, nil
+}
+
+func initConfigItems(conf *DriverConfig) {
+	if conf.SupportedFilesystems == "" {
+		conf.SupportedFilesystems = defaultDefaultFs
+	}
+
+	if conf.DefaultVolumeSize == 0 {
+		conf.DefaultVolumeSize = defaultDefaultVolumeSize
+	}
 }

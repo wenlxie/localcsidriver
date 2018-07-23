@@ -1,0 +1,78 @@
+package main
+
+import (
+	"flag"
+	"fmt"
+	"log"
+	"net"
+	"os"
+	"strings"
+
+	"google.golang.org/grpc"
+
+	csi "github.com/container-storage-interface/spec/lib/go/csi/v0"
+	"github.com/kubernetes-csi/localcsidriver/pkg/config"
+	"github.com/kubernetes-csi/localcsidriver/pkg/localvolume"
+	"github.com/kubernetes-csi/localcsidriver/pkg/lvm"
+)
+
+func main() {
+	// Configure flags
+	configPathF := flag.String("config-path", "/etc/config/driver.conf", "The file path of dirver config")
+	nodeNameF := flag.String("node-name", "", "node name to construct access topology for created volumes")
+	socketFileF := flag.String("unix-addr", "unix://tmp/local-csi.sock", "The path to the listening unix socket file")
+	socketFileEnvF := flag.String("unix-addr-env", "", "An optional environment variable from which to read the unix-addr")
+	flag.Parse()
+	// Setup logging
+	logprefix := fmt.Sprintf("[%s]", "CSI local driver")
+	logflags := log.LstdFlags | log.Lshortfile
+	logger := log.New(os.Stderr, logprefix, logflags)
+	localvolume.SetLogger(logger)
+	lvm.SetLogger(logger)
+	// Determine listen address.
+	if *socketFileF != "" && *socketFileEnvF != "" {
+		log.Fatalf("Cannot specify -unix-addr and -unix-addr-env")
+	}
+	sock := *socketFileF
+	if *socketFileEnvF != "" {
+		sock = os.Getenv(*socketFileEnvF)
+	}
+	if strings.HasPrefix(sock, "unix://") {
+		sock = sock[len("unix://"):]
+	}
+	// Setup socket listener
+	lis, err := net.Listen("unix", sock)
+	if err != nil {
+		log.Fatalf("Failed to listen: %v", err)
+	}
+	// Setup server
+	var grpcOpts []grpc.ServerOption
+	grpcOpts = append(grpcOpts,
+		grpc.UnaryInterceptor(
+			localvolume.ChainUnaryServer(
+				localvolume.LoggingInterceptor(),
+			),
+		),
+	)
+	grpcServer := grpc.NewServer(grpcOpts...)
+
+	driverConfig, err := config.LoadDriverConfig(*configPathF)
+	if err != nil {
+		log.Fatalf("Error loading driver config: %v", err)
+	}
+
+	s, err := localvolume.NewServer(driverConfig)
+	if err != nil {
+		log.Fatalf("Error initializing localvolume plugin: %v", err)
+	}
+
+	stopCh := make(chan struct{})
+
+	if err := s.Setup(stopCh); err != nil {
+		log.Fatalf("Error initializing localvolume plugin: %v", err)
+	}
+	csi.RegisterIdentityServer(grpcServer, s)
+	csi.RegisterControllerServer(grpcServer, s)
+	csi.RegisterNodeServer(grpcServer, s)
+	grpcServer.Serve(lis)
+}
