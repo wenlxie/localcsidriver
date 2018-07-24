@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	defaultDefaultFs         = "xfs"
+	defaultDefaultFs         = "ext4"
 	defaultDefaultVolumeSize = 10 << 30
 )
 
@@ -28,12 +28,14 @@ type DriverConfig struct {
 	// Underlying mechanism of the driver.
 	// currently only lvm is supported.
 	BackendType string `json:"backendType" yaml:"backendType"`
-	// LvmConfig defines lvm releated configuration.
+	// LvmConfig defines lvm related configuration.
 	LvmConfig []VolumeGroupConfig `json:"lvmConfig" yaml:"lvmConfig"`
-	// Supported filesystems to format new volumes with
+	// Supported filesystems to format new volumes with.
+	// Default to ext4 if not set.
 	// +optional
 	SupportedFilesystems string `json:"supportedFilesystems" yaml:"supportedFilesystems"`
-	// The default volume size in bytes
+	// The default volume size in bytes.
+	// Default to 10 GiB if not set.
 	// +optional
 	DefaultVolumeSize uint64 `json:"defaultVolumeSize" yaml:"defaultVolumeSize"`
 	// Node name to construct access topology for created volumes

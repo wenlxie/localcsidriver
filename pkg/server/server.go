@@ -1,20 +1,17 @@
 package server
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi/v0"
 	"github.com/kubernetes-csi/localcsidriver/pkg/backend"
 	"github.com/kubernetes-csi/localcsidriver/pkg/config"
-	"github.com/kubernetes-csi/localcsidriver/pkg/lvm"
 	"github.com/kubernetes-csi/localcsidriver/pkg/util"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc/codes"
@@ -23,13 +20,13 @@ import (
 	volumeutil "k8s.io/kubernetes/pkg/volume/util"
 )
 
-const PluginName = "io.kubernetes.storage.localvolume"
+const PluginName = "csi-local"
 const PluginVersion = "0.2.0"
 const DefaultVolumeSize = 10 << 30
 const LvmBackendSelectionKey = "volume-group"
 
 // Key specified in field "VolumeAttributes" to indicate source path of the volume.
-// e.g volume-path=/etc/vg1/lv1
+// e.g volume-path=/dev/vg1/lv1
 // Users need to manually specify the field for static volumes.
 const VolumePathKey = "volume-path"
 
@@ -51,11 +48,9 @@ type Server struct {
 	mounter              *mount.SafeFormatAndMount
 }
 
-// New returns a new Server that will manage the multi LVM volume
-// groups. It accepts a variadic list of ServerOpt with which the server's
-// default options can be overwritten. The Setup method must be called before
-// any other further method calls are performed in order to setup the
-// volume groups.
+// New returns a new Server that will manage multi LVM volume groups.
+// The Setup method must be called before any other further method calls
+// are performed in order to keep backends (volume groups for LVM) up-to-date.
 func New(config *config.DriverConfig) (*Server, error) {
 	s := &Server{
 		defaultVolumeSize:    config.DefaultVolumeSize,
@@ -83,6 +78,7 @@ func New(config *config.DriverConfig) (*Server, error) {
 	for _, filesystem := range supportedFilesystems {
 		s.supportedFilesystems[filesystem] = filesystem
 	}
+
 	// Take the first one as default filesystem.
 	s.supportedFilesystems[""] = supportedFilesystems[0]
 
@@ -90,7 +86,7 @@ func New(config *config.DriverConfig) (*Server, error) {
 	case "lvm":
 		s.backendSelectionKey = LvmBackendSelectionKey
 		for index, group := range config.LvmConfig {
-			lvmBackend, err := backend.NewLvmBackend(group.Name, group.DiscoveryDir, strings.Split(group.Tags, ","), s.mounter)
+			lvmBackend, err := backend.NewLvmBackend(group.Name, group.DiscoveryDir, strings.Split(group.Tags, ","))
 			if err != nil {
 				return nil, fmt.Errorf("failed to create backend for volume group %s: %v", group, err)
 			}
@@ -200,10 +196,13 @@ func (s *Server) CreateVolume(
 		return nil, err
 	}
 
-	// Get storage  backend via the key speficied in parameters.
-	storageBackend, err := s.getBackendFromRequest(request)
+	// Get storage backend via the key specified in parameters.
+	storageBackend, err := s.getBackendFromParams(request)
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(
+			codes.Internal,
+			"Error getting storage backend: %v",
+			err)
 	}
 
 	// Check whether a volume with the given name already exists.
@@ -253,36 +252,31 @@ func (s *Server) CreateVolume(
 				err)
 		}
 		log.Printf("BytesFree: %v", bytesFree)
+
+		sizeInRequest := uint64(volumeutil.RoundUpToGiB(capacityRange.GetRequiredBytes()))
+		if sizeInRequest >= size {
+			size = sizeInRequest
+		}
 		// Check whether there is enough free space available.
-		if int64(bytesFree) < capacityRange.GetRequiredBytes() {
+		if bytesFree < size {
 			return nil, ErrInsufficientCapacity
 		}
-		// Set the volume size to the minimum requested size.
-		size = uint64(capacityRange.GetRequiredBytes())
 	}
 	log.Printf("Creating volume id=%v, size=%v", volumeId, size)
 	vol, err := storageBackend.CreateVolume(volumeId, size)
 	if err != nil {
-		if err == lvm.ErrInvalidLVName {
-			return nil, status.Errorf(
-				codes.InvalidArgument,
-				"The volume name is invalid: err=%v",
-				err)
-		}
-		if err == lvm.ErrNoSpace {
-			// Somehow, despite checking for sufficient space
-			// above, we still have insuffient free space.
-			return nil, ErrInsufficientCapacity
-		}
 		return nil, status.Errorf(
 			codes.Internal,
-			"Error in CreateLogicalVolume: err=%v",
+			"Error in CreateVolume: %v",
 			err)
 	}
 
 	volPath, err := vol.Path()
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(
+			codes.Internal,
+			"Error in Getting volume path: %v",
+			err)
 	}
 
 	response := &csi.CreateVolumeResponse{
@@ -328,7 +322,7 @@ func (s *Server) validateExistingVolume(vol backend.Volume, request *csi.CreateV
 		// specified, thanks to the specification and the request
 		// validation logic.
 	}
-	// The existing volume matches the requested capacity_range.  We
+	// The existing volume matches the requested capacity_range. We
 	// determine whether the existing volume satisfies all requested
 	// volume_capabilities.
 	sourcePath, err := vol.Path()
@@ -343,7 +337,7 @@ func (s *Server) validateExistingVolume(vol backend.Volume, request *csi.CreateV
 	if err != nil {
 		return status.Errorf(
 			codes.Internal,
-			"Cannot determine filesystem type: err=%v",
+			"Cannot determine filesystem type: %v",
 			err)
 	}
 	log.Printf("Existing filesystem type is '%v'", existingFsType)
@@ -399,7 +393,10 @@ func (s *Server) DeleteVolume(
 	// Get Backend via volume ID
 	storageBackend, err := s.getBackendFromVolumeID(id)
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(
+			codes.Internal,
+			"Error getting storage backend: %v",
+			err)
 	}
 
 	log.Printf("Looking up volume with id=%v", id)
@@ -414,48 +411,25 @@ func (s *Server) DeleteVolume(
 	if err != nil {
 		return nil, status.Errorf(
 			codes.Internal,
-			"Error in Path(): err=%v",
+			"Error in Path(): %v",
 			err)
 	}
-	log.Printf("Deleting data on device %v", path)
-	if err := deleteDataOnDevice(path); err != nil {
+	log.Printf("Cleaning up data on device %v", path)
+	if err := util.CleanupDataOnDevice(path); err != nil {
 		return nil, status.Errorf(
 			codes.Internal,
-			"Cannot delete data from device: err=%v",
+			"Cannot cleanup data from device: %v",
 			err)
 	}
 	log.Printf("Removing volume")
 	if err := storageBackend.DeleteVolume(vol.Name()); err != nil {
 		return nil, status.Errorf(
 			codes.Internal,
-			"Failed to remove volume: err=%v",
+			"Failed to remove volume: %v",
 			err)
 	}
 	response := &csi.DeleteVolumeResponse{}
 	return response, nil
-}
-
-func deleteDataOnDevice(devicePath string) error {
-	// This method is the go equivalent of
-	// `dd if=/dev/zero of=PhysicalVolume`.
-	file, err := os.OpenFile(devicePath, os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	devzero, err := os.Open("/dev/zero")
-	if err != nil {
-		return err
-	}
-	defer devzero.Close()
-	if _, err := io.Copy(file, devzero); err != nil {
-		// We expect to stop when we get ENOSPC.
-		if perr, ok := err.(*os.PathError); ok && perr.Err == syscall.ENOSPC {
-			return nil
-		}
-		return err
-	}
-	panic("localvolume: expected ENOSPC when erasing data")
 }
 
 var ErrCallNotImplemented = status.Error(codes.Unimplemented, "That RPC is not implemented.")
@@ -502,7 +476,10 @@ func (s *Server) ValidateVolumeCapabilities(
 	// Get Backend via volume ID
 	storageBackend, err := s.getBackendFromVolumeID(id)
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(
+			codes.Internal,
+			"Error getting storage backend: %v",
+			err)
 	}
 
 	log.Printf("Looking up volume with id=%v", id)
@@ -609,17 +586,20 @@ func (s *Server) GetCapacity(
 		}
 	}
 
-	// Get storage  backend via the key speficied in parameters.
-	storageBackend, err := s.getBackendFromRequest(request)
+	// Get storage  backend via the key specified in parameters.
+	storageBackend, err := s.getBackendFromParams(request)
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(
+			codes.Internal,
+			"Error getting storage backend: %v",
+			err)
 	}
 
 	bytesToal, err := storageBackend.BytesTotal()
 	if err != nil {
 		return nil, status.Errorf(
 			codes.Internal,
-			"Error in bytesToal: err=%v",
+			"Error in bytesToal: %v",
 			err)
 	}
 	log.Printf("BytesToal: %v", bytesToal)
@@ -777,39 +757,82 @@ func (s *Server) NodePublishVolume(
 		return nil, err
 	}
 
+	sourcePath := request.GetStagingTargetPath()
 	targetPath := request.GetTargetPath()
+	readonly := request.GetVolumeCapability().GetAccessMode().GetMode() == csi.VolumeCapability_AccessMode_SINGLE_NODE_READER_ONLY
+	readonly = readonly || request.GetReadonly()
+	mountFlags := request.GetVolumeCapability().GetMount().GetMountFlags()
+
+	switch accessType := request.GetVolumeCapability().GetAccessType().(type) {
+	case *csi.VolumeCapability_Block:
+		if err := s.nodePublishBlock(sourcePath, targetPath); err != nil {
+			return nil, status.Error(codes.Internal, err.Error())
+		}
+	case *csi.VolumeCapability_Mount:
+		if err := s.nodePublishFile(sourcePath, targetPath, readonly, mountFlags); err != nil {
+			return nil, status.Error(codes.Internal, err.Error())
+		}
+	default:
+		return nil, status.Errorf(
+			codes.OutOfRange,
+			"unknown access_type: %v",
+			accessType,
+		)
+	}
+
+	return &csi.NodePublishVolumeResponse{}, nil
+}
+
+func (s *Server) nodePublishFile(sourcePath, targetPath string, readonly bool, mountFlags []string) error {
 	notMnt, err := s.mounter.IsNotMountPoint(targetPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			if err = os.MkdirAll(targetPath, 0750); err != nil {
-				return nil, status.Error(codes.Internal, err.Error())
+				return fmt.Errorf("error creating target path: %v", err)
 			}
 			notMnt = true
 		} else {
-			return nil, status.Error(codes.Internal, err.Error())
+			return fmt.Errorf("error validating target path: %v", err)
 		}
 	}
 
 	if !notMnt {
-		return &csi.NodePublishVolumeResponse{}, nil
+		return nil
 	}
-
-	readonly := request.GetVolumeCapability().GetAccessMode().GetMode() == csi.VolumeCapability_AccessMode_SINGLE_NODE_READER_ONLY
-	readonly = readonly || request.GetReadonly()
-	volumeID := request.GetVolumeId()
-	mountFlags := request.GetVolumeCapability().GetMount().GetMountFlags()
 
 	options := []string{"bind"}
 	options = append(options, mountFlags...)
 	if readonly {
 		options = append(options, "ro")
 	}
-	if err := s.mounter.Mount(request.GetStagingTargetPath(), targetPath, "", options); err != nil {
-		return nil, err
+	if err := s.mounter.Mount(sourcePath, targetPath, "", options); err != nil {
+		return err
 	}
-	log.Printf("volume %s has been mounted to %s.", volumeID, targetPath)
 
-	return &csi.NodePublishVolumeResponse{}, nil
+	return nil
+}
+
+func (s *Server) nodePublishBlock(sourcePath, mapPath string) error {
+	if !filepath.IsAbs(mapPath) {
+		return fmt.Errorf("The map path should be absolute: map path: %s", mapPath)
+	}
+
+	// Check and create mapPath
+	_, err := os.Stat(mapPath)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err = os.MkdirAll(mapPath, 0750); err != nil {
+		return fmt.Errorf("failed to mkdir %s, error %v", mapPath, err)
+	}
+	// Remove old symbolic link(or file) then create new one.
+	// This should be done because current symbolic link is
+	// stale across node reboot.
+	if err = os.Remove(mapPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	err = os.Symlink(sourcePath, mapPath)
+	return err
 }
 
 func determineFilesystemType(devicePath string) (string, error) {
@@ -874,20 +897,6 @@ func (s *Server) NodeGetInfo(context.Context, *csi.NodeGetInfoRequest) (*csi.Nod
 	return nil, ErrCallNotImplemented
 }
 
-func zeroPartitionTable(devicePath string) error {
-	// This method is the go equivalent of
-	// `dd if=/dev/zero of=PhysicalVolume bs=512 count=1`.
-	file, err := os.OpenFile(devicePath, os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	if _, err := file.Write(bytes.Repeat([]byte{0}, 512)); err != nil {
-		return err
-	}
-	return nil
-}
-
 func (s *Server) NodeGetCapabilities(
 	ctx context.Context,
 	request *csi.NodeGetCapabilitiesRequest) (*csi.NodeGetCapabilitiesResponse, error) {
@@ -908,18 +917,16 @@ func (s *Server) NodeGetCapabilities(
 	return response, nil
 }
 
-// CSI Request with parameters specified, e.g CreateVolumeRequest/GetCapacityRequest
+// CSI Requests with parameters specified. e.g CreateVolumeRequest/GetCapacityRequest
 // the server can get storage backend form it.
 type RequestWithParameters interface {
 	GetParameters() map[string]string
 }
 
-func (s *Server) getBackendFromRequest(request RequestWithParameters) (backend.StorageBackend, error) {
-	var backendKey string
+func (s *Server) getBackendFromParams(request RequestWithParameters) (backend.StorageBackend, error) {
+	backendKey := ""
 	params := request.GetParameters()
-	if params == nil {
-		backendKey = ""
-	} else {
+	if params != nil {
 		backendKey = params[s.backendSelectionKey]
 	}
 
@@ -932,7 +939,7 @@ func (s *Server) getBackendFromRequest(request RequestWithParameters) (backend.S
 }
 
 func (s *Server) getBackendFromVolumeID(id string) (backend.StorageBackend, error) {
-	backendKey, err := getBackendFromVolumeID(id)
+	backendKey, err := backendKeyFromVolumeID(id)
 	if err != nil {
 		return nil, err
 	}
@@ -945,11 +952,11 @@ func (s *Server) getBackendFromVolumeID(id string) (backend.StorageBackend, erro
 	return storageBackend, nil
 }
 
-// getBackendFromVolumeID convert given volume ID into storage backend name and internal ID.
-func getBackendFromVolumeID(inputID string) (backend string, err error) {
+// backendKeyFromVolumeID convert given volume ID into storage backend name and internal ID.
+func backendKeyFromVolumeID(inputID string) (backend string, err error) {
 	volumeInfo := strings.Split(inputID, "_")
-	if len(volumeInfo) != 2 {
-		return "", fmt.Errorf("input volume ID is not in format of 'backend_ID' but %s", inputID)
+	if len(volumeInfo) < 2 {
+		return "", fmt.Errorf("input volume ID is not in format of '<backend>_<ID>' but %s", inputID)
 	}
 
 	return volumeInfo[0], nil

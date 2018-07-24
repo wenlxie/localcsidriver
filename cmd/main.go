@@ -18,8 +18,8 @@ import (
 
 func main() {
 	// Configure flags
-	configPathF := flag.String("config-path", "/etc/config/driver.conf", "The file path of dirver config")
-	socketFileF := flag.String("unix-addr", "unix://tmp/local-csi.sock", "The path to the listening unix socket file")
+	configPathF := flag.String("config-path", "/etc/config/local-driver.conf", "The file path of dirver config")
+	socketFileF := flag.String("unix-addr", "/run/csi/local-driver.sock", "The path to the listening unix socket file")
 	socketFileEnvF := flag.String("unix-addr-env", "", "An optional environment variable from which to read the unix-addr")
 	flag.Parse()
 	// Setup logging
