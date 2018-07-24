@@ -80,6 +80,8 @@ func (l *LvmBackend) Sync() error {
 				return fmt.Errorf("error looking up physical volume for %s: %v", device, err)
 			}
 			// PV not exist, create one
+			// TODO: It might take quite a while to erase the data,
+			// consider improving this.
 			if err := util.ZeroPartitionTable(device); err != nil {
 				return fmt.Errorf(
 					"Cannot zero partition table on %s: %v",

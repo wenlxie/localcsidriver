@@ -45,10 +45,12 @@ var ErrBlockVolNoRO = status.Error(
 	"Cannot publish block volume as readonly.")
 
 func (s *Server) validateVolumeCapability(volumeCapability *csi.VolumeCapability, unsupportedFsOK, readonly bool) error {
+	/*
 	accessType := volumeCapability.GetAccessType()
 	if accessType == nil {
 		return ErrMissingAccessType
 	}
+	*/
 	if mnt := volumeCapability.GetMount(); mnt != nil {
 		// This is a MOUNT_VOLUME request.
 		fstype := mnt.GetFsType()

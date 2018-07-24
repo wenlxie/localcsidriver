@@ -623,12 +623,6 @@ func (s *Server) ControllerGetCapabilities(
 			},
 		},
 		// PUBLISH_UNPUBLISH_VOLUME
-		//
-		//     Not supported by Controller service. This is
-		//     performed by the Node service for the Logical
-		//     Volume Service.
-		//
-		// LIST_VOLUMES
 		{
 			Type: &csi.ControllerServiceCapability_Rpc{
 				Rpc: &csi.ControllerServiceCapability_RPC{
@@ -659,7 +653,11 @@ func (s *Server) NodeStageVolume(
 	}
 
 	targetPath := request.GetStagingTargetPath()
-	fsType := request.GetVolumeCapability().GetMount().GetFsType()
+
+	fsType := ""
+	if mnt := request.GetVolumeCapability().GetMount(); mnt != nil {
+		fsType = mnt.GetFsType()
+	}
 	if fsType == "" {
 		fsType = s.supportedFilesystems[""]
 	}
@@ -689,7 +687,7 @@ func (s *Server) NodeStageVolume(
 	*/
 
 	// As path of static volumes cannot be found via storage backend,
-	// we'll need to specify path in volume attributes.
+	// we'll need to specify path as volume attributes.
 	volPath := request.GetVolumeAttributes()[VolumePathKey]
 	if volPath == "" {
 		return nil, fmt.Errorf("failed to get volume path from stating request")
@@ -707,13 +705,19 @@ func (s *Server) NodeStageVolume(
 		options = append(options, mountFlags...)
 
 		// Mount
-		if util.IsBlock(volPath) {
+		volumeType, err := s.mounter.GetFileType(volPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get volume type: %v", err)
+		}
+
+		switch volumeType {
+		case mount.FileTypeBlockDev:
 			err = s.mounter.FormatAndMount(volPath, targetPath, fsType, options)
-		} else if util.IsDir(volPath) {
+		case mount.FileTypeFile, mount.FileTypeDirectory:
 			options = append([]string{"bind"}, options...)
 			err = s.mounter.Mount(volPath, targetPath, fsType, options)
-		} else {
-			err = fmt.Errorf("path %s of volume %s is neither of block nor of filesystem", volPath, request.GetVolumeId())
+		default:
+			err = fmt.Errorf("unsupported volume source type: %v", volumeType)
 		}
 
 		if err != nil {
@@ -800,6 +804,7 @@ func (s *Server) nodePublishFile(sourcePath, targetPath string, readonly bool, m
 		return nil
 	}
 
+	// We'll only meet the scenario of bind mount for volume of filesystem.
 	options := []string{"bind"}
 	options = append(options, mountFlags...)
 	if readonly {
@@ -823,7 +828,7 @@ func (s *Server) nodePublishBlock(sourcePath, mapPath string) error {
 		return err
 	}
 	if err = os.MkdirAll(mapPath, 0750); err != nil {
-		return fmt.Errorf("failed to mkdir %s, error %v", mapPath, err)
+		return fmt.Errorf("failed to mkdir %s: %v", mapPath, err)
 	}
 	// Remove old symbolic link(or file) then create new one.
 	// This should be done because current symbolic link is

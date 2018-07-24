@@ -8,7 +8,6 @@ import (
 	"path"
 	"syscall"
 
-	"golang.org/x/sys/unix"
 )
 
 // ReadDir returns a list of full path
@@ -34,33 +33,6 @@ func ReadDir(fullPath string) ([]string, error) {
 	return fileList, nil
 }
 
-// IsDir checks if the given path is a directory
-func IsDir(fullPath string) bool {
-	dir, err := os.Open(fullPath)
-	if err != nil {
-		return false
-	}
-	defer dir.Close()
-
-	stat, err := dir.Stat()
-	if err != nil {
-		return false
-	}
-
-	return stat.IsDir()
-}
-
-// IsBlock checks if the given path is a block device
-func IsBlock(fullPath string) bool {
-	var st unix.Stat_t
-	err := unix.Stat(fullPath, &st)
-	if err != nil {
-		return false
-	}
-
-	return (st.Mode & unix.S_IFMT) == unix.S_IFBLK
-}
-
 // ZeroPartitionTable is the go equivalent of
 // `dd if=/dev/zero of=devicePath bs=512 count=1`.
 func ZeroPartitionTable(devicePath string) error {
@@ -76,7 +48,7 @@ func ZeroPartitionTable(devicePath string) error {
 }
 
 // This method is the go equivalent of
-// `dd if=/dev/zero of=PhysicalVolume`.
+// `dd if=/dev/zero of=devicePath`.
 func CleanupDataOnDevice(devicePath string) error {
 	file, err := os.OpenFile(devicePath, os.O_WRONLY, 0644)
 	if err != nil {
