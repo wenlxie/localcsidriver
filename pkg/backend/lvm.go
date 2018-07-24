@@ -71,7 +71,6 @@ func (l *LvmBackend) Sync() error {
 		devices = append(devices, device)
 	}
 
-
 	// Check if the devices exist in the group, add if not in.
 	devicesToAdd := []*lvm.PhysicalVolume{}
 	for _, device := range devices {

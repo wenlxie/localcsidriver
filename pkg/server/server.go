@@ -253,7 +253,7 @@ func (s *Server) CreateVolume(
 		}
 		log.Printf("BytesFree: %v", bytesFree)
 
-		sizeInRequest := uint64(volumeutil.RoundUpToGiB(capacityRange.GetRequiredBytes()))
+		sizeInRequest := uint64(volumeutil.RoundUpSize(capacityRange.GetRequiredBytes(), volumeutil.GIB))
 		if sizeInRequest >= size {
 			size = sizeInRequest
 		}
