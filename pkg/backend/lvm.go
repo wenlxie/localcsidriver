@@ -1,30 +1,40 @@
 package backend
 
 import (
+	"bufio"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
+	"strings"
+	"sync"
 
+	"github.com/kubernetes-csi/localcsidriver/pkg/config"
 	"github.com/kubernetes-csi/localcsidriver/pkg/lvm"
 	"github.com/kubernetes-csi/localcsidriver/pkg/util"
 )
 
 type LvmBackend struct {
 	*lvm.VolumeGroup
-	tags         []string
-	discoveryDir string
+	discoveryDir        string
+	blockCleanerCommand []string
+	needCleanupDevice   bool
+	tags                []string
 }
 
-func NewLvmBackend(groupName, discoveryDir string, tags []string) (*LvmBackend, error) {
+func NewLvmBackend(config config.VolumeGroupConfig) (*LvmBackend, error) {
+	tags := strings.Split(config.Tags, ",")
 	for _, tag := range tags {
 		if err := lvm.ValidateTag(tag); err != nil {
 			return nil, fmt.Errorf("invalid tag %s: %v", tag, err)
 		}
 	}
 	return &LvmBackend{
-		VolumeGroup:  lvm.NewVolumeGroup(groupName),
-		discoveryDir: discoveryDir,
-		tags:         tags,
+		VolumeGroup:         lvm.NewVolumeGroup(config.Name),
+		discoveryDir:        config.DiscoveryDir,
+		blockCleanerCommand: config.BlockCleanerCommand,
+		needCleanupDevice:   config.NeedCleanupDevice,
+		tags:                tags,
 	}, nil
 }
 
@@ -46,7 +56,81 @@ func (l *LvmBackend) DeleteVolume(volName string) error {
 		return err
 	}
 
+	volPath, err := lv.Path()
+	if err != nil {
+		return err
+	}
+
+	// Cleaning up data on device
+	if err := l.cleanupDataOnVolume(volName, volPath); err != nil {
+		return err
+	}
+
 	return lv.Remove()
+}
+
+func (l *LvmBackend) cleanupDataOnVolume(volName, volPath string) error {
+	if len(l.blockCleanerCommand) < 1 {
+		// No cleanup command specified, use the default.
+		return util.CleanupDataOnDevice(volPath)
+	}
+
+	err := l.execScript(volName, volPath, l.blockCleanerCommand[0], l.blockCleanerCommand[1:]...)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (l *LvmBackend) execScript(volName, volPath string, exe string, exeArgs ...string) error {
+	cmd := exec.Command(exe, exeArgs...)
+	// Scripts should be able to fetch volume path from env.
+	cmd.Env = append(os.Environ(), fmt.Sprintf("%s=%s", config.LocalVolumeEnv, volPath))
+	var wg sync.WaitGroup
+	// Wait for stderr & stdout  go routines
+	wg.Add(2)
+
+	outReader, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		defer wg.Done()
+		outScanner := bufio.NewScanner(outReader)
+		for outScanner.Scan() {
+			outstr := outScanner.Text()
+			log.Printf("Cleanup lv %q: StdoutBuf - %q", volName, outstr)
+		}
+	}()
+
+	errReader, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		defer wg.Done()
+		errScanner := bufio.NewScanner(errReader)
+		for errScanner.Scan() {
+			errstr := errScanner.Text()
+			log.Printf("Cleanup lv %q: StderrBuf - %q", volName, errstr)
+		}
+	}()
+
+	err = cmd.Start()
+	if err != nil {
+		return err
+	}
+
+	wg.Wait()
+	err = cmd.Wait()
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // Sync walk through the files under its discovery path,
@@ -80,13 +164,16 @@ func (l *LvmBackend) Sync() error {
 				return fmt.Errorf("error looking up physical volume for %s: %v", device, err)
 			}
 			// PV not exist, create one
-			// TODO: It might take quite a while to erase the data,
-			// consider improving this.
-			if err := util.ZeroPartitionTable(device); err != nil {
-				return fmt.Errorf(
-					"Cannot zero partition table on %s: %v",
-					device, err)
+			// It might take quite a while to erase the data,
+			// so make it configurable.
+			if l.needCleanupDevice {
+				if err := util.CleanupDataOnDevice(device); err != nil {
+					return fmt.Errorf(
+						"Cannot zero partition table on %s: %v",
+						device, err)
+				}
 			}
+
 			newPv, err := lvm.CreatePhysicalVolume(device)
 			if err != nil {
 				return fmt.Errorf("error creating physical volume for %s: %v", device, err)

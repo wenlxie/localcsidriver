@@ -12,6 +12,9 @@ const (
 	defaultDefaultVolumeSize = 10 << 30
 )
 
+// LocalVolumeEnv will contain the device path when script is invoked
+const LocalVolumeEnv = "LOCAL_VOL_BLKDEVICE"
+
 // VolumeGroupConfig is config item for a volume group in lvm.
 type VolumeGroupConfig struct {
 	Name string `json:"name" yaml:"name"`
@@ -21,6 +24,12 @@ type VolumeGroupConfig struct {
 	// Value to tag the volume group with.
 	// +optional
 	Tags string `json:"tags" yaml:"tags"`
+	// The type of block cleaner to use before deleting a volume.
+	BlockCleanerCommand []string `json:"blockCleanerCommand" yaml:"blockCleanerCommand"`
+	// Whether to erase possible data on discovered devices before taking them into group,
+	// If set the field to false, users must ensure the devices are clean before exporting them to driver.
+	// +optional
+	NeedCleanupDevice bool `json:"needCleanupDevice" yaml:"needCleanupDevice"`
 }
 
 // DriverConfig defines driver configuration objects.
