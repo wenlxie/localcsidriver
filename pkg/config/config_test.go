@@ -46,7 +46,7 @@ func TestLoadDriverConfig(t *testing.T) {
 			},
 		},
 	}
-	dirName, err := mkTempDir("config-test")
+	dirName, err := ioutil.TempDir(os.TempDir(), "config-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,10 +65,6 @@ func TestLoadDriverConfig(t *testing.T) {
 	if !reflect.DeepEqual(expectedConfig, out) {
 		t.Fatalf("Expected config %v but got %v", expectedConfig, out)
 	}
-}
-
-func mkTempDir(prefix string) (string, error) {
-	return ioutil.TempDir(os.TempDir(), prefix)
 }
 
 func writeFile(filename string, data []byte) error {

@@ -2688,3 +2688,45 @@ func startTest(vgname string, pvnames []string, serverOpts ...ServerOpt) (client
 	}
 	return client, clean.Unwind
 }
+
+func testNodeStageVolumeRequest(volumeId string, sourcepath string, stagingTargetPath string, filesystem string, mountOpts []string) *csi.NodeStageVolumeRequest {
+	var volumeCapability *csi.VolumeCapability
+	if filesystem == "block" {
+		volumeCapability = &csi.VolumeCapability{
+			AccessType: &csi.VolumeCapability_Block{
+				&csi.VolumeCapability_BlockVolume{},
+			},
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			},
+		}
+	} else {
+		volumeCapability = &csi.VolumeCapability{
+			AccessType: &csi.VolumeCapability_Mount{
+				&csi.VolumeCapability_MountVolume{
+					FsType: filesystem,
+					MountFlags: mountOpts,
+				},
+			},
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			},
+		}
+	}
+
+	req := &csi.NodeStageVolumeRequest{
+		VolumeId:          volumeId,
+		StagingTargetPath: stagingTargetPath,
+		VolumeCapability:  volumeCapability,
+		VolumeAttributes: map[string]string{VolumePathKey: sourcepath},
+	}
+	return req
+}
+
+func testNodeUnstageVolumeRequest(volumeId string, stagingTargetPath string) *csi.NodeUnstageVolumeRequest {
+	req := &csi.NodeUnstageVolumeRequest{
+		VolumeId:          volumeId,
+		StagingTargetPath: stagingTargetPath,
+	}
+	return req
+}
