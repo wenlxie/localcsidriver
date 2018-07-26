@@ -1,11 +1,10 @@
 package server
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 
-	csi "github.com/container-storage-interface/spec/lib/go/csi/v0"
+	"github.com/container-storage-interface/spec/lib/go/csi/v0"
 	"google.golang.org/grpc/status"
 )
 
@@ -15,278 +14,185 @@ import (
 
 // ControllerService RPCs
 
-func TestCreateVolumeRemoveVolumeGroup(t *testing.T) {
-	client, cleanup := startTestValidate(RemoveVolumeGroup())
-	defer cleanup()
-	req := testCreateVolumeRequest()
-	_, err := client.CreateVolume(context.Background(), req)
-	if !grpcErrorEqual(err, ErrRemovingMode) {
-		t.Fatal(err)
-	}
-}
-
 func TestCreateVolumeMissingName(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
 	req := testCreateVolumeRequest()
 	req.Name = ""
-	_, err := client.CreateVolume(context.Background(), req)
+	err := testServer().validateCreateVolumeRequest(req)
 	if !grpcErrorEqual(err, ErrMissingName) {
 		t.Fatal(err)
 	}
 }
 
 func TestCreateVolumeMissingVolumeCapabilities(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
 	req := testCreateVolumeRequest()
 	req.VolumeCapabilities = nil
-	_, err := client.CreateVolume(context.Background(), req)
+	err := testServer().validateCreateVolumeRequest(req)
 	if !grpcErrorEqual(err, ErrMissingVolumeCapabilities) {
 		t.Fatal(err)
 	}
 }
 
+/*
 func TestCreateVolumeMissingVolumeCapabilitiesAccessType(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
 	req := testCreateVolumeRequest()
 	req.VolumeCapabilities[0].AccessType = nil
-	_, err := client.CreateVolume(context.Background(), req)
+	err := testServer().validateCreateVolumeRequest(req)
 	if !grpcErrorEqual(err, ErrMissingAccessType) {
 		t.Fatal(err)
 	}
 }
+*/
 
 func TestCreateVolumeMissingVolumeCapabilitiesAccessMode(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
 	req := testCreateVolumeRequest()
 	req.VolumeCapabilities[0].AccessMode = nil
-	_, err := client.CreateVolume(context.Background(), req)
+	err := testServer().validateCreateVolumeRequest(req)
 	if !grpcErrorEqual(err, ErrMissingAccessMode) {
 		t.Fatal(err)
 	}
 }
 
 func TestCreateVolumeVolumeCapabilitiesAccessModeUNKNOWN(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
 	req := testCreateVolumeRequest()
 	req.VolumeCapabilities[0].AccessMode.Mode = csi.VolumeCapability_AccessMode_UNKNOWN
-	_, err := client.CreateVolume(context.Background(), req)
+	err := testServer().validateCreateVolumeRequest(req)
 	if !grpcErrorEqual(err, ErrMissingAccessModeMode) {
 		t.Fatal(err)
 	}
 }
 
 func TestCreateVolumeVolumeCapabilitiesAccessModeUnsupported(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
 	req := testCreateVolumeRequest()
 	req.VolumeCapabilities[0].AccessMode.Mode = csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY
-	_, err := client.CreateVolume(context.Background(), req)
+	err := testServer().validateCreateVolumeRequest(req)
 	if !grpcErrorEqual(err, ErrUnsupportedAccessMode) {
 		t.Fatal(err)
 	}
 }
 
 func TestCreateVolumeVolumeCapabilitiesAccessModeInvalid(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
 	req := testCreateVolumeRequest()
 	req.VolumeCapabilities[0].AccessMode.Mode = 1000
-	_, err := client.CreateVolume(context.Background(), req)
+	err := testServer().validateCreateVolumeRequest(req)
 	if !grpcErrorEqual(err, ErrInvalidAccessMode) {
 		t.Fatal(err)
 	}
 }
 
 func TestCreateVolumeVolumeCapabilitiesReadonlyBlock(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
 	req := testCreateVolumeRequest()
 	req.VolumeCapabilities[0].AccessMode.Mode = csi.VolumeCapability_AccessMode_SINGLE_NODE_READER_ONLY
-	_, err := client.CreateVolume(context.Background(), req)
+	err := testServer().validateCreateVolumeRequest(req)
 	if !grpcErrorEqual(err, ErrBlockVolNoRO) {
 		t.Fatal(err)
 	}
 }
 
 func TestCreateVolumeVolumeCapabilitiesCapacityRangeRequiredLessThanLimit(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
 	req := testCreateVolumeRequest()
 	req.CapacityRange.RequiredBytes = 1000
 	req.CapacityRange.LimitBytes = req.CapacityRange.RequiredBytes - 1
-	_, err := client.CreateVolume(context.Background(), req)
+	err := testServer().validateCreateVolumeRequest(req)
 	if !grpcErrorEqual(err, ErrCapacityRangeInvalidSize) {
 		t.Fatal(err)
 	}
 }
 
 func TestCreateVolumeVolumeCapabilitiesCapacityRangeUnspecified(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
 	req := testCreateVolumeRequest()
 	req.CapacityRange.RequiredBytes = 0
 	req.CapacityRange.LimitBytes = 0
-	_, err := client.CreateVolume(context.Background(), req)
+	err := testServer().validateCreateVolumeRequest(req)
 	if !grpcErrorEqual(err, ErrCapacityRangeUnspecified) {
 		t.Fatal(err)
 	}
 }
 
-func TestDeleteVolumeRemoveVolumeGroup(t *testing.T) {
-	client, cleanup := startTestValidate(RemoveVolumeGroup())
-	defer cleanup()
-	req := testDeleteVolumeRequest("test-volume")
-	_, err := client.DeleteVolume(context.Background(), req)
-	if !grpcErrorEqual(err, ErrRemovingMode) {
-		t.Fatal(err)
-	}
-}
-
 func TestDeleteVolumeMissingVolumeId(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
 	req := testDeleteVolumeRequest("test-volume")
 	req.VolumeId = ""
-	_, err := client.DeleteVolume(context.Background(), req)
+	err := testServer().validateDeleteVolumeRequest(req)
 	if !grpcErrorEqual(err, ErrMissingVolumeId) {
 		t.Fatal(err)
 	}
 }
 
-func TestValidateVolumeCapabilitiesRemoveVolumeGroup(t *testing.T) {
-	client, cleanup := startTestValidate(RemoveVolumeGroup())
-	defer cleanup()
-	req := testValidateVolumeCapabilitiesRequest("fake_volume_id", "", nil)
-	_, err := client.ValidateVolumeCapabilities(context.Background(), req)
-	if !grpcErrorEqual(err, ErrRemovingMode) {
-		t.Fatal(err)
-	}
-}
-
 func TestValidateVolumeCapabilitiesMissingVolumeId(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
 	req := testValidateVolumeCapabilitiesRequest("fake_volume_id", "", nil)
 	req.VolumeId = ""
-	_, err := client.ValidateVolumeCapabilities(context.Background(), req)
+	err := testServer().validateValidateVolumeCapabilitiesRequest(req)
 	if !grpcErrorEqual(err, ErrMissingVolumeId) {
 		t.Fatal(err)
 	}
 }
 
 func TestValidateVolumeCapabilitiesMissingVolumeCapabilities(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
 	req := testValidateVolumeCapabilitiesRequest("fake_volume_id", "", nil)
 	req.VolumeCapabilities = nil
-	_, err := client.ValidateVolumeCapabilities(context.Background(), req)
+	err := testServer().validateValidateVolumeCapabilitiesRequest(req)
 	if !grpcErrorEqual(err, ErrMissingVolumeCapabilities) {
 		t.Fatal(err)
 	}
 }
 
+/*
 func TestValidateVolumeCapabilitiesMissingVolumeCapabilitiesAccessType(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
 	req := testValidateVolumeCapabilitiesRequest("fake_volume_id", "", nil)
 	req.VolumeCapabilities[0].AccessType = nil
-	_, err := client.ValidateVolumeCapabilities(context.Background(), req)
+	err := testServer().validateValidateVolumeCapabilitiesRequest(req)
 	if !grpcErrorEqual(err, ErrMissingAccessType) {
 		t.Fatal(err)
 	}
 }
+*/
 
 func TestValidateVolumeCapabilitiesNodeUnpublishVolume_MountVolume_BadFilesystem(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
 	req := testValidateVolumeCapabilitiesRequest("fake_volume_id", "ext4", nil)
-	_, err := client.ValidateVolumeCapabilities(context.Background(), req)
+	err := testServer().validateValidateVolumeCapabilitiesRequest(req)
 	if !grpcErrorEqual(err, ErrUnsupportedFilesystem) {
 		t.Fatal(err)
 	}
 }
 
 func TestValidateVolumeCapabilitiesMissingVolumeCapabilitiesAccessMode(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
 	req := testValidateVolumeCapabilitiesRequest("fake_volume_id", "", nil)
 	req.VolumeCapabilities[0].AccessMode = nil
-	_, err := client.ValidateVolumeCapabilities(context.Background(), req)
+	err := testServer().validateValidateVolumeCapabilitiesRequest(req)
 	if !grpcErrorEqual(err, ErrMissingAccessMode) {
 		t.Fatal(err)
 	}
 }
 
 func TestValidateVolumeCapabilitiesVolumeCapabilitiesAccessModeUNKNOWN(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
 	req := testValidateVolumeCapabilitiesRequest("fake_volume_id", "", nil)
 	req.VolumeCapabilities[0].AccessMode.Mode = csi.VolumeCapability_AccessMode_UNKNOWN
-	_, err := client.ValidateVolumeCapabilities(context.Background(), req)
+	err := testServer().validateValidateVolumeCapabilitiesRequest(req)
 	if !grpcErrorEqual(err, ErrMissingAccessModeMode) {
 		t.Fatal(err)
 	}
 }
 
-func TestListVolumesRemoveVolumeGroup(t *testing.T) {
-	client, cleanup := startTestValidate(RemoveVolumeGroup())
-	defer cleanup()
-	req := testListVolumesRequest()
-	resp, err := client.ListVolumes(context.Background(), req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if e := resp.GetEntries(); len(e) > 0 {
-		t.Fatalf("unexpected volumes were listed: %v", e)
-	}
-}
-
-func TestGetCapacityMissingVolumeCapabilitiesAccessType(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
-	req := testGetCapacityRequest("xfs")
-	req.VolumeCapabilities[0].AccessType = nil
-	_, err := client.GetCapacity(context.Background(), req)
-	if !grpcErrorEqual(err, ErrMissingAccessType) {
-		t.Fatal(err)
-	}
-}
-
-func TestGetCapacity_BadFilesystem(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
+func TestGetCapacityBadFilesystem(t *testing.T) {
 	req := testGetCapacityRequest("ext4")
-	resp, err := client.GetCapacity(context.Background(), req)
+	err := testServer().validateGetCapacityRequest(req)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if resp.GetAvailableCapacity() != 0 {
-		t.Fatalf("Expected available_capacity=0 for unsupported filesystem type")
 	}
 }
 
 func TestGetCapacityMissingVolumeCapabilitiesAccessMode(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
 	req := testGetCapacityRequest("xfs")
 	req.VolumeCapabilities[0].AccessMode = nil
-	_, err := client.GetCapacity(context.Background(), req)
+	err := testServer().validateGetCapacityRequest(req)
 	if !grpcErrorEqual(err, ErrMissingAccessMode) {
 		t.Fatal(err)
 	}
 }
 
 func TestGetCapacityVolumeCapabilitiesAccessModeUNKNOWN(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
 	req := testGetCapacityRequest("xfs")
 	req.VolumeCapabilities[0].AccessMode.Mode = csi.VolumeCapability_AccessMode_UNKNOWN
-	_, err := client.GetCapacity(context.Background(), req)
+	err := testServer().validateGetCapacityRequest(req)
 	if !grpcErrorEqual(err, ErrMissingAccessModeMode) {
 		t.Fatal(err)
 	}
@@ -294,135 +200,193 @@ func TestGetCapacityVolumeCapabilitiesAccessModeUNKNOWN(t *testing.T) {
 
 // NodeService RPCs
 
-var fakeMountDir = "/run/dcos/localvolume/mnt"
-
-func TestNodePublishVolumeRemoveVolumeGroup(t *testing.T) {
-	client, cleanup := startTestValidate(RemoveVolumeGroup())
-	defer cleanup()
-	req := testNodePublishVolumeRequest("fake_volume_id", fakeMountDir, "", nil)
-	_, err := client.NodePublishVolume(context.Background(), req)
-	if !grpcErrorEqual(err, ErrRemovingMode) {
-		t.Fatal(err)
-	}
-}
+var fakeDevicePath = "/dev/device1"
+var fakeStagingPath = "/run/mnt/global"
+var fakeMountDir = "/run/localvolume/mnt"
 
 func TestNodePublishVolumeMissingVolumeId(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
-	req := testNodePublishVolumeRequest("fake_volume_id", fakeMountDir, "", nil)
+	req := testNodePublishVolumeRequest("fake_volume_id", fakeMountDir, fakeStagingPath, "", nil)
 	req.VolumeId = ""
-	_, err := client.NodePublishVolume(context.Background(), req)
+	err := testServer().validateNodePublishVolumeRequest(req)
 	if !grpcErrorEqual(err, ErrMissingVolumeId) {
 		t.Fatal(err)
 	}
 }
 
 func TestNodePublishVolumePresentPublishVolumeInfo(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
-	req := testNodePublishVolumeRequest("fake_volume_id", fakeMountDir, "", nil)
+	req := testNodePublishVolumeRequest("fake_volume_id", fakeMountDir, fakeStagingPath, "", nil)
 	req.PublishInfo = map[string]string{"foo": "bar"}
-	_, err := client.NodePublishVolume(context.Background(), req)
+	err := testServer().validateNodePublishVolumeRequest(req)
 	if !grpcErrorEqual(err, ErrSpecifiedPublishInfo) {
 		t.Fatal(err)
 	}
 }
 
 func TestNodePublishVolumeMissingTargetPath(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
-	req := testNodePublishVolumeRequest("fake_volume_id", fakeMountDir, "", nil)
+	req := testNodePublishVolumeRequest("fake_volume_id", fakeMountDir, fakeStagingPath, "", nil)
 	req.TargetPath = ""
-	_, err := client.NodePublishVolume(context.Background(), req)
+	err := testServer().validateNodePublishVolumeRequest(req)
 	if !grpcErrorEqual(err, ErrMissingTargetPath) {
 		t.Fatal(err)
 	}
 }
 
+func TestNodePublishVolumeMissingStagingTargetPath(t *testing.T) {
+	req := testNodePublishVolumeRequest("fake_volume_id", fakeMountDir, fakeStagingPath, "", nil)
+	req.StagingTargetPath = ""
+	err := testServer().validateNodePublishVolumeRequest(req)
+	if !grpcErrorEqual(err, ErrMissingStagingTargetPath) {
+		t.Fatal(err)
+	}
+}
+
 func TestNodePublishVolumeMissingVolumeCapability(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
-	req := testNodePublishVolumeRequest("fake_volume_id", fakeMountDir, "", nil)
+	req := testNodePublishVolumeRequest("fake_volume_id", fakeMountDir, fakeStagingPath, "", nil)
 	req.VolumeCapability = nil
-	_, err := client.NodePublishVolume(context.Background(), req)
+	err := testServer().validateNodePublishVolumeRequest(req)
 	if !grpcErrorEqual(err, ErrMissingVolumeCapability) {
 		t.Fatal(err)
 	}
 }
 
-func TestNodePublishVolumeMissingVolumeCapabilityAccessType(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
-	req := testNodePublishVolumeRequest("fake_volume_id", fakeMountDir, "", nil)
-	req.VolumeCapability.AccessType = nil
-	_, err := client.NodePublishVolume(context.Background(), req)
-	if !grpcErrorEqual(err, ErrMissingAccessType) {
-		t.Fatal(err)
-	}
-}
-
 func TestNodePublishVolumeMissingVolumeCapabilityAccessMode(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
-	req := testNodePublishVolumeRequest("fake_volume_id", fakeMountDir, "", nil)
+	req := testNodePublishVolumeRequest("fake_volume_id", fakeMountDir, fakeStagingPath, "", nil)
 	req.VolumeCapability.AccessMode = nil
-	_, err := client.NodePublishVolume(context.Background(), req)
+	err := testServer().validateNodePublishVolumeRequest(req)
 	if !grpcErrorEqual(err, ErrMissingAccessMode) {
 		t.Fatal(err)
 	}
 }
 
 func TestNodePublishVolumeVolumeCapabilityAccessModeUNKNOWN(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
-	req := testNodePublishVolumeRequest("fake_volume_id", fakeMountDir, "", nil)
+	req := testNodePublishVolumeRequest("fake_volume_id", fakeMountDir, fakeStagingPath, "", nil)
 	req.VolumeCapability.AccessMode.Mode = csi.VolumeCapability_AccessMode_UNKNOWN
-	_, err := client.NodePublishVolume(context.Background(), req)
+	err := testServer().validateNodePublishVolumeRequest(req)
 	if !grpcErrorEqual(err, ErrMissingAccessModeMode) {
 		t.Fatal(err)
 	}
 }
 
-func TestNodePublishVolumeNodeUnpublishVolume_MountVolume_BadFilesystem(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
-	req := testNodePublishVolumeRequest("fake_volume_id", fakeMountDir, "ext4", nil)
-	_, err := client.NodePublishVolume(context.Background(), req)
+func TestNodePublishVolumeBadFilesystem(t *testing.T) {
+	req := testNodePublishVolumeRequest("fake_volume_id", fakeMountDir, fakeStagingPath, "ext4", nil)
+	err := testServer().validateNodePublishVolumeRequest(req)
 	if !grpcErrorEqual(err, ErrUnsupportedFilesystem) {
 		t.Fatal(err)
 	}
 }
 
-var fakeTargetPath = filepath.Join(fakeMountDir, "fake_volume_id")
-
-func TestNodeUnpublishVolumeRemoveVolumeGroup(t *testing.T) {
-	client, cleanup := startTestValidate(RemoveVolumeGroup())
-	defer cleanup()
-	req := testNodeUnpublishVolumeRequest("fake_volume_id", fakeTargetPath)
-	_, err := client.NodeUnpublishVolume(context.Background(), req)
-	if !grpcErrorEqual(err, ErrRemovingMode) {
-		t.Fatal(err)
-	}
-}
-
 func TestNodeUnpublishVolumeMissingVolumeId(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
-	req := testNodeUnpublishVolumeRequest("fake_volume_id", fakeTargetPath)
+	req := testNodeUnpublishVolumeRequest("fake_volume_id", fakeMountDir)
 	req.VolumeId = ""
-	_, err := client.NodeUnpublishVolume(context.Background(), req)
+	err := testServer().validateNodeUnpublishVolumeRequest(req)
 	if !grpcErrorEqual(err, ErrMissingVolumeId) {
 		t.Fatal(err)
 	}
 }
 
 func TestNodeUnpublishVolumeMissingTargetPath(t *testing.T) {
-	client, cleanup := startTestValidate()
-	defer cleanup()
-	req := testNodeUnpublishVolumeRequest("fake_volume_id", fakeTargetPath)
+	req := testNodeUnpublishVolumeRequest("fake_volume_id", fakeMountDir)
 	req.TargetPath = ""
-	_, err := client.NodeUnpublishVolume(context.Background(), req)
+	err := testServer().validateNodeUnpublishVolumeRequest(req)
 	if !grpcErrorEqual(err, ErrMissingTargetPath) {
+		t.Fatal(err)
+	}
+}
+
+func TestNodeStageVolumeMissingVolumeId(t *testing.T) {
+	req := testNodeStageVolumeRequest("fake_volume_id", fakeDevicePath, fakeStagingPath, "", nil)
+	req.VolumeId = ""
+	err := testServer().validateNodeStageVolumeRequest(req)
+	if !grpcErrorEqual(err, ErrMissingVolumeId) {
+		t.Fatal(err)
+	}
+}
+
+func TestNodeStageVolumePresentPublishVolumeInfo(t *testing.T) {
+	req := testNodeStageVolumeRequest("fake_volume_id", fakeDevicePath, fakeStagingPath, "", nil)
+	req.PublishInfo = map[string]string{"foo": "bar"}
+	err := testServer().validateNodeStageVolumeRequest(req)
+	if !grpcErrorEqual(err, ErrSpecifiedPublishInfo) {
+		t.Fatal(err)
+	}
+}
+
+func TestNodeStageVolumeMissingStagingTargetPath(t *testing.T) {
+	req := testNodeStageVolumeRequest("fake_volume_id", fakeDevicePath, fakeStagingPath, "", nil)
+	req.StagingTargetPath = ""
+	err := testServer().validateNodeStageVolumeRequest(req)
+	if !grpcErrorEqual(err, ErrMissingStagingTargetPath) {
+		t.Fatal(err)
+	}
+}
+
+func TestNodeStageVolumeMissingVolumeAttributes(t *testing.T) {
+	req := testNodeStageVolumeRequest("fake_volume_id", fakeDevicePath, fakeStagingPath, "", nil)
+	req.VolumeAttributes = nil
+	err := testServer().validateNodeStageVolumeRequest(req)
+	if !grpcErrorEqual(err, ErrMissingVolumeAttributes) {
+		t.Fatal(err)
+	}
+}
+
+func TestNodeStageVolumeMissingVolumePath(t *testing.T) {
+	req := testNodeStageVolumeRequest("fake_volume_id", fakeDevicePath, fakeStagingPath, "", nil)
+	req.VolumeAttributes = map[string]string{}
+	err := testServer().validateNodeStageVolumeRequest(req)
+	if !grpcErrorEqual(err, ErrMissingVolumePath) {
+		t.Fatal(err)
+	}
+}
+
+func TestNodeStageVolumeMissingVolumeCapability(t *testing.T) {
+	req := testNodeStageVolumeRequest("fake_volume_id", fakeDevicePath, fakeStagingPath, "", nil)
+	req.VolumeCapability = nil
+	err := testServer().validateNodeStageVolumeRequest(req)
+	if !grpcErrorEqual(err, ErrMissingVolumeCapability) {
+		t.Fatal(err)
+	}
+}
+
+func TestNodeStageVolumeMissingVolumeCapabilityAccessMode(t *testing.T) {
+	req := testNodeStageVolumeRequest("fake_volume_id", fakeDevicePath, fakeStagingPath, "", nil)
+	req.VolumeCapability.AccessMode = nil
+	err := testServer().validateNodeStageVolumeRequest(req)
+	if !grpcErrorEqual(err, ErrMissingAccessMode) {
+		t.Fatal(err)
+	}
+}
+
+func TestNodeStageVolumeVolumeCapabilityAccessModeUNKNOWN(t *testing.T) {
+	req := testNodeStageVolumeRequest("fake_volume_id", fakeDevicePath, fakeStagingPath, "", nil)
+	req.VolumeCapability.AccessMode.Mode = csi.VolumeCapability_AccessMode_UNKNOWN
+	err := testServer().validateNodeStageVolumeRequest(req)
+	if !grpcErrorEqual(err, ErrMissingAccessMode) {
+		t.Fatal(err)
+	}
+}
+
+func TestNodeStageVolumeBadFilesystem(t *testing.T) {
+	req := testNodeStageVolumeRequest("fake_volume_id", fakeDevicePath, fakeStagingPath, "ext4", nil)
+	err := testServer().validateNodeStageVolumeRequest(req)
+	if !grpcErrorEqual(err, ErrUnsupportedFilesystem) {
+		t.Fatal(err)
+	}
+}
+
+func TestNodeUnstageVolumeMissingVolumeId(t *testing.T) {
+	req := testNodeUnstageVolumeRequest("fake_volume_id", fakeStagingPath)
+	req.VolumeId = ""
+	err := testServer().validateNodeUnstageVolumeRequest(req)
+	if !grpcErrorEqual(err, ErrMissingVolumeId) {
+		t.Fatal(err)
+	}
+}
+
+func TestNodeUnstageVolumeMissingStagingTargetPath(t *testing.T) {
+	req := testNodeUnstageVolumeRequest("fake_volume_id", fakeStagingPath)
+	req.StagingTargetPath = ""
+	err := testServer().validateNodeUnstageVolumeRequest(req)
+	if !grpcErrorEqual(err, ErrMissingStagingTargetPath) {
 		t.Fatal(err)
 	}
 }
@@ -439,9 +403,197 @@ func grpcErrorEqual(gotErr, expErr error) bool {
 	return got.Code() == exp.Code() && got.Message() == exp.Message()
 }
 
-func startTestValidate(serverOpts ...ServerOpt) (client *Client, cleanupFn func()) {
-	vgname := testvgname()
-	pvname, pvclean := testpv()
-	defer pvclean()
-	return startTest(vgname, []string{pvname}, serverOpts...)
+func testServer() *Server {
+	return &Server{
+		supportedFilesystems: map[string]string{"xfs": "xfs"},
+	}
+}
+
+func testCreateVolumeRequest() *csi.CreateVolumeRequest {
+	const requiredBytes = 80 << 20
+	const limitBytes = 1000 << 20
+	volumeCapabilities := []*csi.VolumeCapability{
+		{
+			AccessType: &csi.VolumeCapability_Block{
+				&csi.VolumeCapability_BlockVolume{},
+			},
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			},
+		},
+		{
+			AccessType: &csi.VolumeCapability_Mount{
+				&csi.VolumeCapability_MountVolume{
+					FsType: "xfs",
+					MountFlags: nil,
+				},
+			},
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			},
+		},
+	}
+	req := &csi.CreateVolumeRequest{
+		Name: "test-volume",
+		CapacityRange: &csi.CapacityRange{
+			RequiredBytes: requiredBytes,
+			LimitBytes: limitBytes,
+		},
+		VolumeCapabilities: volumeCapabilities,
+		Parameters: nil,
+		ControllerCreateSecrets: nil,
+	}
+	return req
+}
+
+func testDeleteVolumeRequest(volumeId string) *csi.DeleteVolumeRequest {
+	req := &csi.DeleteVolumeRequest{
+		VolumeId: volumeId,
+		ControllerDeleteSecrets: nil,
+	}
+	return req
+}
+
+func testValidateVolumeCapabilitiesRequest(volumeId string, filesystem string, mountOpts []string) *csi.ValidateVolumeCapabilitiesRequest {
+	volumeCapabilities := []*csi.VolumeCapability{
+		{
+			AccessType: &csi.VolumeCapability_Block{
+				&csi.VolumeCapability_BlockVolume{},
+			},
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			},
+		},
+		{
+			AccessType: &csi.VolumeCapability_Mount{
+				&csi.VolumeCapability_MountVolume{
+					FsType: filesystem,
+					MountFlags: mountOpts,
+				},
+			},
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			},
+		},
+	}
+	req := &csi.ValidateVolumeCapabilitiesRequest{
+		VolumeId: volumeId,
+		VolumeCapabilities: volumeCapabilities,
+		VolumeAttributes: nil,
+	}
+	return req
+}
+
+func testGetCapacityRequest(fstype string) *csi.GetCapacityRequest {
+	volumeCapabilities := []*csi.VolumeCapability{
+		{
+			AccessType: &csi.VolumeCapability_Block{
+				&csi.VolumeCapability_BlockVolume{},
+			},
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			},
+		},
+		{
+			AccessType: &csi.VolumeCapability_Mount{
+				&csi.VolumeCapability_MountVolume{
+					FsType: fstype,
+					MountFlags: nil,
+				},
+			},
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			},
+		},
+	}
+	req := &csi.GetCapacityRequest{
+		VolumeCapabilities: volumeCapabilities,
+		Parameters: nil,
+	}
+	return req
+}
+
+func testNodePublishVolumeRequest(volumeId string, targetPath string, stagingTargetPath string, filesystem string, mountOpts []string) *csi.NodePublishVolumeRequest {
+	var volumeCapability *csi.VolumeCapability
+	if filesystem == "block" {
+		volumeCapability = &csi.VolumeCapability{
+			AccessType: &csi.VolumeCapability_Block{
+				&csi.VolumeCapability_BlockVolume{},
+			},
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			},
+		}
+	} else {
+		volumeCapability = &csi.VolumeCapability{
+			AccessType: &csi.VolumeCapability_Mount{
+				&csi.VolumeCapability_MountVolume{
+					FsType: filesystem,
+					MountFlags: mountOpts,
+				},
+			},
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			},
+		}
+	}
+	const readonly = false
+	req := &csi.NodePublishVolumeRequest{
+		VolumeId:          volumeId,
+		StagingTargetPath: stagingTargetPath,
+		TargetPath:        targetPath,
+		VolumeCapability:  volumeCapability,
+		Readonly:          readonly,
+	}
+	return req
+}
+
+func testNodeUnpublishVolumeRequest(volumeId string, targetPath string) *csi.NodeUnpublishVolumeRequest {
+	req := &csi.NodeUnpublishVolumeRequest{
+		VolumeId:   volumeId,
+		TargetPath: targetPath,
+	}
+	return req
+}
+
+func testNodeStageVolumeRequest(volumeId string, sourcepath string, stagingTargetPath string, filesystem string, mountOpts []string) *csi.NodeStageVolumeRequest {
+	var volumeCapability *csi.VolumeCapability
+	if filesystem == "block" {
+		volumeCapability = &csi.VolumeCapability{
+			AccessType: &csi.VolumeCapability_Block{
+				&csi.VolumeCapability_BlockVolume{},
+			},
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			},
+		}
+	} else {
+		volumeCapability = &csi.VolumeCapability{
+			AccessType: &csi.VolumeCapability_Mount{
+				&csi.VolumeCapability_MountVolume{
+					FsType: filesystem,
+					MountFlags: mountOpts,
+				},
+			},
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			},
+		}
+	}
+
+	req := &csi.NodeStageVolumeRequest{
+		VolumeId:          volumeId,
+		StagingTargetPath: stagingTargetPath,
+		VolumeCapability:  volumeCapability,
+		VolumeAttributes: map[string]string{VolumePathKey: sourcepath},
+	}
+	return req
+}
+
+func testNodeUnstageVolumeRequest(volumeId string, stagingTargetPath string) *csi.NodeUnstageVolumeRequest {
+	req := &csi.NodeUnstageVolumeRequest{
+		VolumeId:          volumeId,
+		StagingTargetPath: stagingTargetPath,
+	}
+	return req
 }

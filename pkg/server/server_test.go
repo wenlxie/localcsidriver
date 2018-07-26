@@ -147,31 +147,34 @@ func testCreateVolumeRequest() *csi.CreateVolumeRequest {
 	const limitBytes = 1000 << 20
 	volumeCapabilities := []*csi.VolumeCapability{
 		{
-			&csi.VolumeCapability_Block{
+			AccessType: &csi.VolumeCapability_Block{
 				&csi.VolumeCapability_BlockVolume{},
 			},
-			&csi.VolumeCapability_AccessMode{
-				csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
 			},
 		},
 		{
-			&csi.VolumeCapability_Mount{
+			AccessType: &csi.VolumeCapability_Mount{
 				&csi.VolumeCapability_MountVolume{
-					"xfs",
-					nil,
+					FsType: "xfs",
+					MountFlags: nil,
 				},
 			},
-			&csi.VolumeCapability_AccessMode{
-				csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
 			},
 		},
 	}
 	req := &csi.CreateVolumeRequest{
-		"test-volume",
-		&csi.CapacityRange{requiredBytes, limitBytes},
-		volumeCapabilities,
-		nil,
-		nil,
+		Name: "test-volume",
+		CapacityRange: &csi.CapacityRange{
+			RequiredBytes: requiredBytes,
+			LimitBytes: limitBytes,
+		},
+		VolumeCapabilities: volumeCapabilities,
+		Parameters: nil,
+		ControllerCreateSecrets: nil,
 	}
 	return req
 }
@@ -491,8 +494,8 @@ func TestCreateVolumeInvalidVolumeName(t *testing.T) {
 
 func testDeleteVolumeRequest(volumeId string) *csi.DeleteVolumeRequest {
 	req := &csi.DeleteVolumeRequest{
-		volumeId,
-		nil,
+		VolumeId: volumeId,
+		ControllerDeleteSecrets: nil,
 	}
 	return req
 }
@@ -723,29 +726,29 @@ func TestControllerUnpublishVolumeNotSupported(t *testing.T) {
 func testValidateVolumeCapabilitiesRequest(volumeId string, filesystem string, mountOpts []string) *csi.ValidateVolumeCapabilitiesRequest {
 	volumeCapabilities := []*csi.VolumeCapability{
 		{
-			&csi.VolumeCapability_Block{
+			AccessType: &csi.VolumeCapability_Block{
 				&csi.VolumeCapability_BlockVolume{},
 			},
-			&csi.VolumeCapability_AccessMode{
-				csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
 			},
 		},
 		{
-			&csi.VolumeCapability_Mount{
+			AccessType: &csi.VolumeCapability_Mount{
 				&csi.VolumeCapability_MountVolume{
-					filesystem,
-					mountOpts,
+					FsType: filesystem,
+					MountFlags: mountOpts,
 				},
 			},
-			&csi.VolumeCapability_AccessMode{
-				csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
 			},
 		},
 	}
 	req := &csi.ValidateVolumeCapabilitiesRequest{
-		volumeId,
-		volumeCapabilities,
-		nil,
+		VolumeId: volumeId,
+		VolumeCapabilities: volumeCapabilities,
+		VolumeAttributes: nil,
 	}
 	return req
 }
@@ -953,28 +956,28 @@ func TestListVolumes_TwoVolumes(t *testing.T) {
 func testGetCapacityRequest(fstype string) *csi.GetCapacityRequest {
 	volumeCapabilities := []*csi.VolumeCapability{
 		{
-			&csi.VolumeCapability_Block{
+			AccessType: &csi.VolumeCapability_Block{
 				&csi.VolumeCapability_BlockVolume{},
 			},
-			&csi.VolumeCapability_AccessMode{
-				csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
 			},
 		},
 		{
-			&csi.VolumeCapability_Mount{
+			AccessType: &csi.VolumeCapability_Mount{
 				&csi.VolumeCapability_MountVolume{
-					fstype,
-					nil,
+					FsType: fstype,
+					MountFlags: nil,
 				},
 			},
-			&csi.VolumeCapability_AccessMode{
-				csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
 			},
 		},
 	}
 	req := &csi.GetCapacityRequest{
-		volumeCapabilities,
-		nil,
+		VolumeCapabilities: volumeCapabilities,
+		Parameters: nil,
 	}
 	return req
 }
@@ -1094,36 +1097,37 @@ func TestControllerGetCapabilitiesRemoveVolumeGroup(t *testing.T) {
 
 // NodeService RPCs
 
-func testNodePublishVolumeRequest(volumeId string, targetPath string, filesystem string, mountOpts []string) *csi.NodePublishVolumeRequest {
+func testNodePublishVolumeRequest(volumeId string, targetPath string, stagingTargetPath string, filesystem string, mountOpts []string) *csi.NodePublishVolumeRequest {
 	var volumeCapability *csi.VolumeCapability
 	if filesystem == "block" {
 		volumeCapability = &csi.VolumeCapability{
-			&csi.VolumeCapability_Block{
+			AccessType: &csi.VolumeCapability_Block{
 				&csi.VolumeCapability_BlockVolume{},
 			},
-			&csi.VolumeCapability_AccessMode{
-				csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
 			},
 		}
 	} else {
 		volumeCapability = &csi.VolumeCapability{
-			&csi.VolumeCapability_Mount{
+			AccessType: &csi.VolumeCapability_Mount{
 				&csi.VolumeCapability_MountVolume{
-					filesystem,
-					mountOpts,
+					FsType: filesystem,
+					MountFlags: mountOpts,
 				},
 			},
-			&csi.VolumeCapability_AccessMode{
-				csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
 			},
 		}
 	}
 	const readonly = false
 	req := &csi.NodePublishVolumeRequest{
-		VolumeId:         volumeId,
-		TargetPath:       targetPath,
-		VolumeCapability: volumeCapability,
-		Readonly:         readonly,
+		VolumeId:          volumeId,
+		StagingTargetPath: stagingTargetPath,
+		TargetPath:        targetPath,
+		VolumeCapability:  volumeCapability,
+		Readonly:          readonly,
 	}
 	return req
 }

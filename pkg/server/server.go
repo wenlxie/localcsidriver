@@ -687,9 +687,6 @@ func (s *Server) NodeStageVolume(
 	// As path of static volumes cannot be found via storage backend,
 	// we'll need to specify path as volume attributes.
 	volPath := request.GetVolumeAttributes()[VolumePathKey]
-	if volPath == "" {
-		return nil, fmt.Errorf("failed to get volume path from stating request")
-	}
 
 	// Volume Mount
 	if notMnt {

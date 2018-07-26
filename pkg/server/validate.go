@@ -1,7 +1,7 @@
 package server
 
 import (
-	csi "github.com/container-storage-interface/spec/lib/go/csi/v0"
+	"github.com/container-storage-interface/spec/lib/go/csi/v0"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -46,10 +46,10 @@ var ErrBlockVolNoRO = status.Error(
 
 func (s *Server) validateVolumeCapability(volumeCapability *csi.VolumeCapability, unsupportedFsOK, readonly bool) error {
 	/*
-	accessType := volumeCapability.GetAccessType()
-	if accessType == nil {
-		return ErrMissingAccessType
-	}
+		accessType := volumeCapability.GetAccessType()
+		if accessType == nil {
+			return ErrMissingAccessType
+		}
 	*/
 	if mnt := volumeCapability.GetMount(); mnt != nil {
 		// This is a MOUNT_VOLUME request.
@@ -187,6 +187,7 @@ func (s *Server) validateControllerGetCapabilitiesRequest(request *csi.Controlle
 
 var ErrMissingTargetPath = status.Error(codes.InvalidArgument, "The target_path field must be specified.")
 var ErrMissingStagingTargetPath = status.Error(codes.InvalidArgument, "The staging_target_path field must be specified.")
+var ErrMissingVolumePath = status.Error(codes.InvalidArgument, "Volume path must be specified in volumeAttributes.")
 var ErrMissingVolumeCapability = status.Error(codes.InvalidArgument, "The volume_capability field must be specified.")
 var ErrMissingVolumeAttributes = status.Error(codes.InvalidArgument, "The attributes field must be specified.")
 var ErrSpecifiedPublishInfo = status.Error(codes.InvalidArgument, "The publish_volume_info field must not be specified.")
@@ -199,6 +200,10 @@ func (s *Server) validateNodePublishVolumeRequest(request *csi.NodePublishVolume
 	publishInfo := request.GetPublishInfo()
 	if publishInfo != nil {
 		return ErrSpecifiedPublishInfo
+	}
+	stagingTargetPath := request.GetStagingTargetPath()
+	if stagingTargetPath == "" {
+		return ErrMissingStagingTargetPath
 	}
 	targetPath := request.GetTargetPath()
 	if targetPath == "" {
@@ -241,6 +246,10 @@ func (s *Server) validateNodeStageVolumeRequest(request *csi.NodeStageVolumeRequ
 	targetPath := request.GetStagingTargetPath()
 	if targetPath == "" {
 		return ErrMissingStagingTargetPath
+	}
+	volPath := request.GetVolumeAttributes()[VolumePathKey]
+	if volPath == "" {
+		return ErrMissingVolumePath
 	}
 	volumeCapability := request.GetVolumeCapability()
 	if volumeCapability == nil {
