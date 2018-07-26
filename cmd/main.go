@@ -19,8 +19,7 @@ import (
 func main() {
 	// Configure flags
 	configPathF := flag.String("config-path", "/etc/config/local-driver.conf", "The file path of dirver config")
-	socketFileF := flag.String("unix-addr", "/run/csi/local-driver.sock", "The path to the listening unix socket file")
-	socketFileEnvF := flag.String("unix-addr-env", "", "An optional environment variable from which to read the unix-addr")
+	endpointF := flag.String("endpoint", "unix:///var/lib/kubelet/plugins/kubernetes.io.csi.local/csi.sock", "The path to the listening unix socket file")
 	flag.Parse()
 	// Setup logging
 	logprefix := fmt.Sprintf("[%s]", "CSI local driver")
@@ -29,13 +28,7 @@ func main() {
 	server.SetLogger(logger)
 	lvm.SetLogger(logger)
 	// Determine listen address.
-	if *socketFileF != "" && *socketFileEnvF != "" {
-		log.Fatalf("Cannot specify -unix-addr and -unix-addr-env")
-	}
-	sock := *socketFileF
-	if *socketFileEnvF != "" {
-		sock = os.Getenv(*socketFileEnvF)
-	}
+	sock := *endpointF
 	if strings.HasPrefix(sock, "unix://") {
 		sock = sock[len("unix://"):]
 	}

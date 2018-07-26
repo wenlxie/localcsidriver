@@ -18,7 +18,7 @@ import (
 	volumeutil "k8s.io/kubernetes/pkg/volume/util"
 )
 
-const PluginName = "csi-local"
+const PluginName = "kubernetes.io.csi.local"
 const PluginVersion = "0.2.0"
 const DefaultVolumeSize = 10 << 30
 const LvmBackendSelectionKey = "volume-group"
@@ -42,8 +42,9 @@ type Server struct {
 	backendSelectionKey  string
 	defaultVolumeSize    uint64
 	supportedFilesystems map[string]string
-	nodeName             string
-	mounter              *mount.SafeFormatAndMount
+	// Node name to construct access topology for created volumes
+	nodeName string
+	mounter  *mount.SafeFormatAndMount
 }
 
 // New returns a new Server that will manage multi LVM volume groups.
@@ -53,22 +54,19 @@ func New(config *config.DriverConfig) (*Server, error) {
 	s := &Server{
 		defaultVolumeSize:    config.DefaultVolumeSize,
 		supportedFilesystems: map[string]string{},
-		nodeName:             config.NodeName,
 		backends:             map[string]backend.StorageBackend{},
 		mounter:              &mount.SafeFormatAndMount{Interface: mount.New(""), Exec: mount.NewOsExec()},
 	}
 
+	// Try to get node name from env if not set.
+	s.nodeName = os.Getenv("KUBE_NODE_NAME")
 	if s.nodeName == "" {
-		// Try to get node name from env if not set.
-		s.nodeName = os.Getenv("NODE_NAME")
-		if s.nodeName == "" {
-			// Take hostname as node name if it's neither set via flag, nor set via env.
-			// This way, users must ensure that node labels of CO side is same to hostname.
-			var err error
-			s.nodeName, err = os.Hostname()
-			if err != nil {
-				return nil, fmt.Errorf("failed to get hostname of the node: %v", err)
-			}
+		// Take hostname as node name if it's not set via env.
+		// This way, users must ensure that node labels of CO side is same to hostname.
+		var err error
+		s.nodeName, err = os.Hostname()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get hostname of the node: %v", err)
 		}
 	}
 

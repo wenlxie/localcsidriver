@@ -47,9 +47,6 @@ type DriverConfig struct {
 	// Default to 10 GiB if not set.
 	// +optional
 	DefaultVolumeSize uint64 `json:"defaultVolumeSize" yaml:"defaultVolumeSize"`
-	// Node name to construct access topology for created volumes
-	// +optional
-	NodeName string `json:"nodeName" yaml:"nodeName"`
 }
 
 // LoadDriverConfig loads config from given file.
