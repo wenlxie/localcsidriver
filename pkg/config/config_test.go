@@ -1,6 +1,10 @@
 package config
 
 import (
+	"io"
+	"io/ioutil"
+	"os"
+	"path"
 	"reflect"
 	"testing"
 )
@@ -38,13 +42,22 @@ func TestLoadDriverConfig(t *testing.T) {
 				Name: "vg2",
 				DiscoveryDir: "/csi/discovery/vg2",
 				Tags: "tag2",
-				BlockCleanerCommand: []string{},
 				NeedCleanupDevice: false,
 			},
 		},
-
 	}
-	out, err := LoadDriverConfig(testconfigTemp)
+	dirName, err := mkTempDir("config-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dirName)
+
+	fileName := path.Join(dirName, "test-conf")
+	if err := writeFile(fileName, []byte(testconfigTemp)); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := LoadDriverConfig(fileName)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,4 +65,23 @@ func TestLoadDriverConfig(t *testing.T) {
 	if !reflect.DeepEqual(expectedConfig, out) {
 		t.Fatalf("Expected config %v but got %v", expectedConfig, out)
 	}
+}
+
+func mkTempDir(prefix string) (string, error) {
+	return ioutil.TempDir(os.TempDir(), prefix)
+}
+
+func writeFile(filename string, data []byte) error {
+	f, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE, 0666)
+	if err != nil {
+		return err
+	}
+	n, err := f.Write(data)
+	if err == nil && n < len(data) {
+		err = io.ErrShortWrite
+	}
+	if err1 := f.Close(); err == nil {
+		err = err1
+	}
+	return err
 }
