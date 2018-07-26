@@ -1,7 +1,6 @@
 package server
 
 import (
-	"path/filepath"
 	"testing"
 
 	"github.com/container-storage-interface/spec/lib/go/csi/v0"
@@ -360,7 +359,7 @@ func TestNodeStageVolumeVolumeCapabilityAccessModeUNKNOWN(t *testing.T) {
 	req := testNodeStageVolumeRequest("fake_volume_id", fakeDevicePath, fakeStagingPath, "", nil)
 	req.VolumeCapability.AccessMode.Mode = csi.VolumeCapability_AccessMode_UNKNOWN
 	err := testServer().validateNodeStageVolumeRequest(req)
-	if !grpcErrorEqual(err, ErrMissingAccessMode) {
+	if !grpcErrorEqual(err, ErrMissingAccessModeMode) {
 		t.Fatal(err)
 	}
 }
@@ -405,7 +404,10 @@ func grpcErrorEqual(gotErr, expErr error) bool {
 
 func testServer() *Server {
 	return &Server{
-		supportedFilesystems: map[string]string{"xfs": "xfs"},
+		supportedFilesystems: map[string]string{
+			"xfs": "xfs",
+			"": "xfs",
+		},
 	}
 }
 

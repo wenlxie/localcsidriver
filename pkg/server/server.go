@@ -84,7 +84,7 @@ func New(config *config.DriverConfig) (*Server, error) {
 		for index, group := range config.LvmConfig {
 			lvmBackend, err := backend.NewLvmBackend(group)
 			if err != nil {
-				return nil, fmt.Errorf("failed to create backend for volume group %s: %v", group, err)
+				return nil, fmt.Errorf("failed to create backend for volume group %v: %v", group, err)
 			}
 			s.backends[group.Name] = lvmBackend
 

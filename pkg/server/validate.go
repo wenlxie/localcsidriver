@@ -247,10 +247,6 @@ func (s *Server) validateNodeStageVolumeRequest(request *csi.NodeStageVolumeRequ
 	if targetPath == "" {
 		return ErrMissingStagingTargetPath
 	}
-	volPath := request.GetVolumeAttributes()[VolumePathKey]
-	if volPath == "" {
-		return ErrMissingVolumePath
-	}
 	volumeCapability := request.GetVolumeCapability()
 	if volumeCapability == nil {
 		return ErrMissingVolumeCapability
@@ -263,6 +259,10 @@ func (s *Server) validateNodeStageVolumeRequest(request *csi.NodeStageVolumeRequ
 	attributes := request.GetVolumeAttributes()
 	if attributes == nil {
 		return ErrMissingVolumeAttributes
+	}
+	volPath := request.GetVolumeAttributes()[VolumePathKey]
+	if volPath == "" {
+		return ErrMissingVolumePath
 	}
 
 	return nil
