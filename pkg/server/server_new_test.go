@@ -718,7 +718,7 @@ func TestNodePublishVolumeNodeUnpublishVolumeBlockVolume(t *testing.T) {
 }
 
 func TestNodeStagePublishUnpublishUnstageMountVolume(t *testing.T) {
-	client, _, clean := setupServer()
+	client, server, clean := setupServer()
 	defer clean()
 	// Create the volume that we'll be publishing.
 	createReq := testCreateVolumeRequest()
@@ -783,7 +783,11 @@ func TestNodeStagePublishUnpublishUnstageMountVolume(t *testing.T) {
 
 
 	// Ensure that the device was mounted.
-	if !targetPathIsMountPoint(publishReq.TargetPath) {
+	notMnt, err := server.mounter.IsNotMountPoint(publishReq.TargetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if notMnt {
 		t.Fatalf("Expected volume to be mounted at %v.", publishReq.TargetPath)
 	}
 	// Create a file on the mounted volume.
@@ -811,7 +815,11 @@ func TestNodeStagePublishUnpublishUnstageMountVolume(t *testing.T) {
 	}
 	alreadyUnpublished = true
 	// Check that the targetPath is now no longer a mountpoint.
-	if targetPathIsMountPoint(publishReq.TargetPath) {
+	notMnt, err = server.mounter.IsNotMountPoint(publishReq.TargetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !notMnt {
 		t.Fatalf("Expected target path %v not to be a mountpoint.", publishReq.TargetPath)
 	}
 	// Check that the file is now missing.
@@ -839,6 +847,48 @@ func TestNodeStagePublishUnpublishUnstageMountVolume(t *testing.T) {
 	if matches[0] != file.Name() {
 		t.Fatalf("Expected to see file %v but got %v.", file.Name(), matches[0])
 	}
+}
+
+func testNodeStageVolumeRequest(volumeId string, sourcepath string, stagingTargetPath string, filesystem string, mountOpts []string) *csi.NodeStageVolumeRequest {
+	var volumeCapability *csi.VolumeCapability
+	if filesystem == "block" {
+		volumeCapability = &csi.VolumeCapability{
+			AccessType: &csi.VolumeCapability_Block{
+				&csi.VolumeCapability_BlockVolume{},
+			},
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			},
+		}
+	} else {
+		volumeCapability = &csi.VolumeCapability{
+			AccessType: &csi.VolumeCapability_Mount{
+				&csi.VolumeCapability_MountVolume{
+					FsType: filesystem,
+					MountFlags: mountOpts,
+				},
+			},
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			},
+		}
+	}
+
+	req := &csi.NodeStageVolumeRequest{
+		VolumeId:          volumeId,
+		StagingTargetPath: stagingTargetPath,
+		VolumeCapability:  volumeCapability,
+		VolumeAttributes: map[string]string{VolumePathKey: sourcepath},
+	}
+	return req
+}
+
+func testNodeUnstageVolumeRequest(volumeId string, stagingTargetPath string) *csi.NodeUnstageVolumeRequest {
+	req := &csi.NodeUnstageVolumeRequest{
+		VolumeId:          volumeId,
+		StagingTargetPath: stagingTargetPath,
+	}
+	return req
 }
 
 func setupServer() (client *Client, server *Server, cleanupFn func()) {
