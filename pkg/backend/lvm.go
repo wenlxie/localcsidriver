@@ -23,11 +23,16 @@ type LvmBackend struct {
 }
 
 func NewLvmBackend(config config.VolumeGroupConfig) (*LvmBackend, error) {
-	tags := strings.Split(config.Tags, ",")
-	for _, tag := range tags {
+	tags := []string{}
+	for _, tag := range strings.Split(config.Tags, ",") {
+		if tag == "" {
+			continue
+		}
 		if err := lvm.ValidateTag(tag); err != nil {
 			return nil, fmt.Errorf("invalid tag %s: %v", tag, err)
 		}
+
+		tags = append(tags, tag)
 	}
 	return &LvmBackend{
 		VolumeGroup:         lvm.NewVolumeGroup(config.Name),

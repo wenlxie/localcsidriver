@@ -39,11 +39,6 @@ var (
 func init() {
 	// Set test logging
 	stdlog.SetFlags(stdlog.LstdFlags | stdlog.Lshortfile)
-	// Refresh the LVM metadata held by the lvmetad process to
-	// clear any metadata left over from a previous run.
-	if err := lvm.PVScan(""); err != nil {
-		panic(err)
-	}
 }
 
 // IdentityService RPCs
@@ -54,32 +49,7 @@ func testGetPluginInfoRequest() *csi.GetPluginInfoRequest {
 }
 
 func TestGetPluginInfo(t *testing.T) {
-	vgname := testvgname()
-	pvname, pvclean := testpv()
-	defer pvclean()
-	client, clean := startTest(vgname, []string{pvname})
-	defer clean()
-	req := testGetPluginInfoRequest()
-	resp, err := client.GetPluginInfo(context.Background(), req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.GetName() != PluginName {
-		t.Fatalf("Expected plugin name %s but got %s", PluginName, resp.GetName())
-	}
-	if resp.GetVendorVersion() != PluginVersion {
-		t.Fatalf("Expected plugin version %s but got %s", PluginVersion, resp.GetVendorVersion())
-	}
-	if resp.GetManifest() != nil {
-		t.Fatalf("Expected a nil manifest but got %s", resp.GetManifest())
-	}
-}
-
-func TestGetPluginInfoRemoveVolumeGroup(t *testing.T) {
-	vgname := testvgname()
-	pvname, pvclean := testpv()
-	defer pvclean()
-	client, clean := startTest(vgname, []string{pvname}, RemoveVolumeGroup())
+	client, clean := setupServer()
 	defer clean()
 	req := testGetPluginInfoRequest()
 	resp, err := client.GetPluginInfo(context.Background(), req)
@@ -103,29 +73,7 @@ func testGetPluginCapabilitiesRequest() *csi.GetPluginCapabilitiesRequest {
 }
 
 func TestGetPluginCapabilities(t *testing.T) {
-	vgname := testvgname()
-	pvname, pvclean := testpv()
-	defer pvclean()
-	client, clean := startTest(vgname, []string{pvname})
-	defer clean()
-	req := testGetPluginCapabilitiesRequest()
-	resp, err := client.GetPluginCapabilities(context.Background(), req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if x := resp.GetCapabilities(); len(x) != 1 {
-		t.Fatalf("Expected 1 capability, but got %v", x)
-	}
-	if x := resp.GetCapabilities()[0].GetService().Type; x != csi.PluginCapability_Service_CONTROLLER_SERVICE {
-		t.Fatalf("Expected plugin to have capability CONTROLLER_SERVICE but had %v", x)
-	}
-}
-
-func TestGetPluginCapabilitiesRemoveVolumeGroup(t *testing.T) {
-	vgname := testvgname()
-	pvname, pvclean := testpv()
-	defer pvclean()
-	client, clean := startTest(vgname, []string{pvname}, RemoveVolumeGroup())
+	client, clean := setupServer()
 	defer clean()
 	req := testGetPluginCapabilitiesRequest()
 	resp, err := client.GetPluginCapabilities(context.Background(), req)
