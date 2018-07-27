@@ -679,8 +679,6 @@ func TestNodePublishVolumeNodeUnpublishVolumeBlockVolume(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpdirPath)
 	targetPath := filepath.Join(tmpdirPath, volumeId)
-	// As we're publishing as a BlockVolume we need to bind mount
-	// the device over a file, not a directory.
 	if file, err := os.Create(targetPath); err != nil {
 		t.Fatal(err)
 	} else {
@@ -764,20 +762,6 @@ func TestNodeStagePublishUnpublishUnstageMountVolume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Unpublish the volume when the test ends unless the test
-	// called unpublish already.
-	alreadyUnpublished := false
-	defer func() {
-		if alreadyUnpublished {
-			return
-		}
-		req := testNodeUnpublishVolumeRequest(volumeId, publishReq.TargetPath)
-		_, err = client.NodeUnpublishVolume(context.Background(), req)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}()
-
 
 	// Ensure that the device was mounted.
 	notMnt, err := server.mounter.IsNotMountPoint(publishReq.TargetPath)
@@ -810,39 +794,11 @@ func TestNodeStagePublishUnpublishUnstageMountVolume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	alreadyUnpublished = true
-	// Check that the targetPath is now no longer a mountpoint.
-	notMnt, err = server.mounter.IsNotMountPoint(publishReq.TargetPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !notMnt {
-		t.Fatalf("Expected target path %v not to be a mountpoint.", publishReq.TargetPath)
-	}
-	// Check that the file is now missing.
-	matches, err = filepath.Glob(file.Name())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(matches) != 0 {
-		t.Fatalf("Expected to see no files but got %v.", matches)
-	}
-	// Publish again to make sure the file comes back
-	_, err = client.NodePublishVolume(context.Background(), publishReq)
-	if err != nil {
-		t.Fatal(err)
-	}
-	alreadyUnpublished = false
-	// Check that the file exists where it is expected.
-	matches, err = filepath.Glob(file.Name())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(matches) != 1 {
-		t.Fatalf("Expected to see only file %v but got %v.", file.Name(), matches)
-	}
-	if matches[0] != file.Name() {
-		t.Fatalf("Expected to see file %v but got %v.", file.Name(), matches[0])
+
+	// Check that the targetPath should has been removed.
+	_, statErr := os.Stat(publishReq.TargetPath)
+	if statErr == nil || !os.IsNotExist(statErr) {
+		t.Fatalf("TargetPath should have been removed")
 	}
 }
 

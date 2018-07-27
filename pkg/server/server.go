@@ -843,7 +843,8 @@ func (s *Server) nodePublishFile(sourcePath, targetPath string, readonly bool, m
 	return nil
 }
 
-func (s *Server) nodePublishBlock(sourcePath, mapPath string) error {
+func (s *Server) nodePublishBlock(sourcePath, linkFile string) error {
+	mapPath := filepath.Dir(linkFile)
 	if !filepath.IsAbs(mapPath) {
 		return fmt.Errorf("The map path should be absolute: map path: %s", mapPath)
 	}
@@ -859,10 +860,10 @@ func (s *Server) nodePublishBlock(sourcePath, mapPath string) error {
 	// Remove old symbolic link(or file) then create new one.
 	// This should be done because current symbolic link is
 	// stale across node reboot.
-	if err = os.Remove(mapPath); err != nil && !os.IsNotExist(err) {
+	if err = os.Remove(linkFile); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	err = os.Symlink(sourcePath, mapPath)
+	err = os.Symlink(sourcePath, linkFile)
 	return err
 }
 
