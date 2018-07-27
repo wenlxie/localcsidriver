@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi/v0"
@@ -761,7 +762,7 @@ func (s *Server) NodeUnstageVolume(
 		return nil, err
 	}
 
-	if err := volumeutil.UnmountPath(request.GetStagingTargetPath(), s.mounter); err != nil {
+	if err := s.doUnmount(request.GetStagingTargetPath()); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
@@ -874,7 +875,7 @@ func (s *Server) NodeUnpublishVolume(
 		return nil, err
 	}
 
-	err := volumeutil.UnmountMountPoint(request.GetTargetPath(), s.mounter, true)
+	err := s.doUnmount(request.GetTargetPath())
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
@@ -958,4 +959,62 @@ func backendKeyFromVolumeID(inputID string) (backend string, err error) {
 	}
 
 	return volumeInfo[0], nil
+}
+
+// doUnmount tries to unmount given path,
+// and remove the path directly if it's not a mountpoint.
+func (s *Server) doUnmount(mountPath string) error {
+	_, err := os.Stat(mountPath)
+	corruptedMnt := isCorruptedMnt(err)
+	if err != nil && !corruptedMnt {
+		log.Printf("Unmount skipped because path does not exist: %v", mountPath)
+	}
+
+	if !corruptedMnt {
+		var notMnt bool
+		var err error
+		notMnt, err = s.mounter.IsNotMountPoint(mountPath)
+
+		if err != nil {
+			return err
+		}
+
+		if notMnt {
+			// This can happen when the path is of block.
+			log.Printf("%s is not a mountpoint, deleting", mountPath)
+			return os.RemoveAll(mountPath)
+		}
+	}
+
+	// Unmount the mount path
+	if err := s.mounter.Unmount(mountPath); err != nil {
+		return err
+	}
+	notMnt, mntErr := s.mounter.IsLikelyNotMountPoint(mountPath)
+	if mntErr != nil {
+		return mntErr
+	}
+	if notMnt {
+		return os.RemoveAll(mountPath)
+	}
+	return fmt.Errorf("failed to unmount path %v", mountPath)
+}
+
+// isCorruptedMnt return true if err is about corrupted mount point
+func isCorruptedMnt(err error) bool {
+	if err == nil {
+		return false
+	}
+	var underlyingError error
+	switch pe := err.(type) {
+	case nil:
+		return false
+	case *os.PathError:
+		underlyingError = pe.Err
+	case *os.LinkError:
+		underlyingError = pe.Err
+	case *os.SyscallError:
+		underlyingError = pe.Err
+	}
+	return underlyingError == syscall.ENOTCONN || underlyingError == syscall.ESTALE
 }
