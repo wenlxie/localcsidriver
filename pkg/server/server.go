@@ -224,7 +224,10 @@ func (s *Server) CreateVolume(
 
 		volPath, err := vol.Path()
 		if err != nil {
-			return nil, err
+			return nil, status.Errorf(
+				codes.Internal,
+				"Error getting volume path: %v",
+				err)
 		}
 		response := &csi.CreateVolumeResponse{
 			Volume: &csi.Volume{
@@ -252,12 +255,13 @@ func (s *Server) CreateVolume(
 		if err != nil {
 			return nil, status.Errorf(
 				codes.Internal,
-				"Error in BytesFree: err=%v",
+				"Error in BytesFree: %v",
 				err)
 		}
 		log.Printf("BytesFree: %v", bytesFree)
 
-		sizeInRequest := uint64(volumeutil.RoundUpSize(capacityRange.GetRequiredBytes(), volumeutil.GIB))
+		// Round up to GiB
+		sizeInRequest := uint64(volumeutil.RoundUpSize(capacityRange.GetRequiredBytes(), volumeutil.GIB)*volumeutil.GIB)
 		if sizeInRequest >= size {
 			size = sizeInRequest
 		}
@@ -554,9 +558,28 @@ func (s *Server) ListVolumes(
 		if err != nil {
 			return nil, ErrVolumeNotFound
 		}
+
+		volPath, err := vol.Path()
+		if err != nil {
+			return nil, status.Errorf(
+				codes.Internal,
+				"Error getting volume path: %v",
+				err)
+		}
+
 		info := &csi.Volume{
 			CapacityBytes: int64(vol.SizeInBytes()),
 			Id:            vol.Name(),
+			Attributes: map[string]string{
+				VolumePathKey: volPath,
+			},
+			AccessibleTopology: []*csi.Topology{
+				{
+					Segments: map[string]string{
+						HostnameKey: s.nodeName,
+					},
+				},
+			},
 		}
 		log.Printf("Found volume %v (%v bytes)", volname, vol.SizeInBytes())
 		entry := &csi.ListVolumesResponse_Entry{Volume: info}

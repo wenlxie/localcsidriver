@@ -87,7 +87,7 @@ func TestGetPluginCapabilities(t *testing.T) {
 
 func testCreateVolumeRequest() *csi.CreateVolumeRequest {
 	const requiredBytes = 2 << 30
-	const limitBytes = 3 << 30
+	const limitBytes = 5 << 30
 	volumeCapabilities := []*csi.VolumeCapability{
 		{
 			AccessType: &csi.VolumeCapability_Block{
@@ -473,7 +473,7 @@ func TestValidateVolumeCapabilitiesMissingVolume(t *testing.T) {
 	client, _, clean := setupServer()
 	defer clean()
 	// Create the volume that we'll be publishing.
-	validateReq := testValidateVolumeCapabilitiesRequest("foo", "xfs", nil)
+	validateReq := testValidateVolumeCapabilitiesRequest("test-group_foo", "xfs", nil)
 	_, err := client.ValidateVolumeCapabilities(context.Background(), validateReq)
 	if !grpcErrorEqual(err, ErrVolumeNotFound) {
 		t.Fatal(err)
@@ -915,6 +915,7 @@ func setupServer() (client *Client, server *Server, cleanupFn func()) {
 			{
 				Name: "test-group",
 				DiscoveryDir: discoveryDir,
+				BlockCleanerCommand: []string{"echo"},
 			},
 		},
 	}
