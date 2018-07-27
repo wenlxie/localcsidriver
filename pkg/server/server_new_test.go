@@ -673,12 +673,12 @@ func TestNodePublishVolumeNodeUnpublishVolumeBlockVolume(t *testing.T) {
 	// Take volume path as symlink source.
 	volumePath := createResp.GetVolume().GetAttributes()[VolumePathKey]
 	// Prepare a temporary mount directory.
-	tmpdirPath, err := ioutil.TempDir("", "server_tests")
+	targetDir, err := ioutil.TempDir("", "server_tests")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpdirPath)
-	targetPath := filepath.Join(tmpdirPath, volumeId)
+	defer os.RemoveAll(targetDir)
+	targetPath := filepath.Join(targetDir, volumeId)
 	if file, err := os.Create(targetPath); err != nil {
 		t.Fatal(err)
 	} else {
@@ -697,7 +697,7 @@ func TestNodePublishVolumeNodeUnpublishVolumeBlockVolume(t *testing.T) {
 	}
 	// Unpublish the volume when the test ends.
 	defer func() {
-		req := testNodeUnpublishVolumeRequest(volumeId, publishReq.TargetPath)
+		req := testNodeUnpublishVolumeRequest(volumeId, targetDir)
 		_, err = client.NodeUnpublishVolume(context.Background(), req)
 		if err != nil {
 			t.Fatal(err)
