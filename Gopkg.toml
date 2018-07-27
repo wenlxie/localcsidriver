@@ -48,3 +48,11 @@ required = [
 [[constraint]]
   branch = "v1"
   name = "gopkg.in/freddierice/go-losetup.v1"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/ghodss/yaml"
+
+[[constraint]]
+  branch = "master"
+  name = "gopkg.in/yaml.v2"

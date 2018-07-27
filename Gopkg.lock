@@ -30,6 +30,12 @@
   version = "v1.0.0"
 
 [[projects]]
+  branch = "v1"
+  name = "gopkg.in/yaml.v2"
+  packages = ["."]
+  revision = "670d4cfef0544295bc27a114dbac37980d83185a"
+
+[[projects]]
   name = "github.com/google/uuid"
   packages = ["."]
   revision = "064e2069ce9c359c118179501254f67d7d37ba24"
