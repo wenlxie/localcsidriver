@@ -23,13 +23,11 @@ import (
 	"github.com/kubernetes-csi/localcsidriver/pkg/cleanup"
 	"github.com/kubernetes-csi/localcsidriver/pkg/config"
 	"github.com/kubernetes-csi/localcsidriver/pkg/lvm"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
 )
 
 // The size of the source devices we create in our tests.
 const devsize = 2 << 30 // 2GiB
+const defaultsize = 1 << 30
 const vgname = "test-group"
 
 
@@ -162,7 +160,7 @@ func TestCreateVolumeDefaultSize(t *testing.T) {
 		t.Fatal(err)
 	}
 	info := resp.GetVolume()
-	if uint64(info.GetCapacityBytes()) != devsize {
+	if uint64(info.GetCapacityBytes()) != defaultsize {
 		t.Fatalf("Expected defaultVolumeSize (%v) to match volume size (%v).", devsize, info.GetCapacityBytes())
 	}
 	if !strings.HasSuffix(info.GetId(), req.GetName()) {
@@ -338,9 +336,8 @@ func TestCreateVolumeInvalidVolumeName(t *testing.T) {
 	// second volume to be created.
 	req.Name = "invalid name : /"
 	_, err := client.CreateVolume(context.Background(), req)
-	expdesc := "The volume name is invalid: err=lvm: Name contains invalid character, valid set includes: [A-Za-z0-9_+.-]"
-	experr := status.Error(codes.InvalidArgument, expdesc)
-	if !grpcErrorEqual(err, experr) {
+	expdesc := "Name contains invalid character"
+	if !strings.Contains(err.Error(), expdesc) {
 		t.Fatal(err)
 	}
 }
@@ -392,7 +389,7 @@ func TestDeleteVolumeIdempotent(t *testing.T) {
 func TestDeleteVolumeUnknownVolume(t *testing.T) {
 	client, _, clean := setupServer()
 	defer clean()
-	req := testDeleteVolumeRequest("missing-volume")
+	req := testDeleteVolumeRequest("test-group_missing-volume")
 	_, err := client.DeleteVolume(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
@@ -913,7 +910,7 @@ func setupServer() (client *Client, server *Server, cleanupFn func()) {
 	conf := &config.DriverConfig{
 		BackendType: "lvm",
 		SupportedFilesystems: "ext4,xfs",
-		DefaultVolumeSize: 1 << 30,
+		DefaultVolumeSize: defaultsize,
 		LvmConfig: []config.VolumeGroupConfig{
 			{
 				Name: "test-group",
