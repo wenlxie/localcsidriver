@@ -26,7 +26,7 @@ import (
 )
 
 // The size of the source devices we create in our tests.
-const devsize = 2 << 30 // 2GiB
+const devsize = 3 << 30 // 3GiB
 const defaultsize = 1 << 30
 const vgname = "test-group"
 
@@ -86,8 +86,8 @@ func TestGetPluginCapabilities(t *testing.T) {
 // ControllerService RPCs
 
 func testCreateVolumeRequest() *csi.CreateVolumeRequest {
-	const requiredBytes = 100 << 20
-	const limitBytes = 1000 << 20
+	const requiredBytes = 2 << 30
+	const limitBytes = 3 << 30
 	volumeCapabilities := []*csi.VolumeCapability{
 		{
 			AccessType: &csi.VolumeCapability_Block{
