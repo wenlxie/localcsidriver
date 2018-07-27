@@ -105,7 +105,11 @@ func New(config *config.DriverConfig) (*Server, error) {
 // Setup calls sync func of the backends in server,
 // to keep things up-to-date.
 func (s *Server) Setup(stopCh chan struct{}) error {
-	for _, storageBackend := range s.backends {
+	for index, storageBackend := range s.backends {
+		if index == "" {
+			// Default backend should have been synced, skip it.
+			continue
+		}
 		if err := storageBackend.Sync(); err != nil {
 			return fmt.Errorf("error syncing %s: %v", storageBackend.Name(), err)
 		}
@@ -119,7 +123,11 @@ func (s *Server) Setup(stopCh chan struct{}) error {
 			case <-stopCh:
 				return
 			case <-ticker.C:
-				for _, storageBackend := range s.backends {
+				for index, storageBackend := range s.backends {
+					if index == "" {
+						// Default backend should have been synced, skip it.
+						continue
+					}
 					if err := storageBackend.Sync(); err != nil {
 						log.Printf("Error syncing %s: %v", storageBackend.Name(), err)
 					}
