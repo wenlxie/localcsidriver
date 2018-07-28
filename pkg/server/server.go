@@ -682,7 +682,12 @@ func (s *Server) NodeStageVolume(
 		return nil, err
 	}
 
+	// As path of static volumes cannot be found via storage backend,
+	// we'll need to specify path as volume attributes.
+	volPath := request.GetVolumeAttributes()[VolumePathKey]
 	targetPath := request.GetStagingTargetPath()
+	readonly := request.GetVolumeCapability().GetAccessMode().GetMode() == csi.VolumeCapability_AccessMode_SINGLE_NODE_READER_ONLY
+	mountFlags := request.GetVolumeCapability().GetMount().GetMountFlags()
 
 	fsType := ""
 	if mnt := request.GetVolumeCapability().GetMount(); mnt != nil {
@@ -692,64 +697,21 @@ func (s *Server) NodeStageVolume(
 		fsType = s.supportedFilesystems[""]
 	}
 
-	// Verify whether mounted
-	notMnt, err := s.mounter.IsLikelyNotMountPoint(targetPath)
-	if err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
-	}
-
-	// Get volume path
-	/*
-		// Get Backend via volume ID
-		storageBackend, err := s.getBackendFromVolumeID(id)
-		if err != nil {
-			return nil, err
-		}
-
-		vol, err := storageBackend.LookupVolume(id)
-		if err != nil {
-			return nil, err
-		}
-		volPath, err := vol.Path()
-		if err != nil {
-			return nil, err
-		}
-	*/
-
-	// As path of static volumes cannot be found via storage backend,
-	// we'll need to specify path as volume attributes.
-	volPath := request.GetVolumeAttributes()[VolumePathKey]
-
-	// Volume Mount
-	if notMnt {
-		// Get Options
-		var options []string
-		readonly := request.GetVolumeCapability().GetAccessMode().GetMode() == csi.VolumeCapability_AccessMode_SINGLE_NODE_READER_ONLY
-		if readonly {
-			options = append(options, "ro")
-		}
-		mountFlags := request.GetVolumeCapability().GetMount().GetMountFlags()
-		options = append(options, mountFlags...)
-
-		// Mount
-		volumeType, err := s.mounter.GetFileType(volPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get volume type: %v", err)
-		}
-
-		switch volumeType {
-		case mount.FileTypeBlockDev:
-			err = s.mounter.FormatAndMount(volPath, targetPath, fsType, options)
-		case mount.FileTypeFile, mount.FileTypeDirectory:
-			options = append([]string{"bind"}, options...)
-			err = s.mounter.Mount(volPath, targetPath, fsType, options)
-		default:
-			err = fmt.Errorf("unsupported volume source type: %v", volumeType)
-		}
-
-		if err != nil {
+	switch accessType := request.GetVolumeCapability().GetAccessType().(type) {
+	case *csi.VolumeCapability_Block:
+		if err := s.doSymlink(volPath, targetPath); err != nil {
 			return nil, status.Error(codes.Internal, err.Error())
 		}
+	case *csi.VolumeCapability_Mount:
+		if err := s.doMount(volPath, targetPath, fsType, readonly, mountFlags); err != nil {
+			return nil, status.Error(codes.Internal, err.Error())
+		}
+	default:
+		return nil, status.Errorf(
+			codes.OutOfRange,
+			"unknown access_type: %v",
+			accessType,
+		)
 	}
 
 	return &csi.NodeStageVolumeResponse{}, nil
@@ -796,11 +758,13 @@ func (s *Server) NodePublishVolume(
 
 	switch accessType := request.GetVolumeCapability().GetAccessType().(type) {
 	case *csi.VolumeCapability_Block:
-		if err := s.nodePublishBlock(sourcePath, targetPath); err != nil {
+		if err := s.doSymlink(sourcePath, targetPath); err != nil {
 			return nil, status.Error(codes.Internal, err.Error())
 		}
 	case *csi.VolumeCapability_Mount:
-		if err := s.nodePublishFile(sourcePath, targetPath, readonly, mountFlags); err != nil {
+		// We'll only need bind mount for NodePublishVolume,
+		// so don't care about fstype here.
+		if err := s.doMount(sourcePath, targetPath, "", readonly, mountFlags); err != nil {
 			return nil, status.Error(codes.Internal, err.Error())
 		}
 	default:
@@ -814,7 +778,7 @@ func (s *Server) NodePublishVolume(
 	return &csi.NodePublishVolumeResponse{}, nil
 }
 
-func (s *Server) nodePublishFile(sourcePath, targetPath string, readonly bool, mountFlags []string) error {
+func (s *Server) doMount(sourcePath, targetPath, fsType string, readonly bool, mountFlags []string) error {
 	notMnt, err := s.mounter.IsNotMountPoint(targetPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -831,20 +795,35 @@ func (s *Server) nodePublishFile(sourcePath, targetPath string, readonly bool, m
 		return nil
 	}
 
-	// We'll only meet the scenario of bind mount for volume of filesystem.
-	options := []string{"bind"}
-	options = append(options, mountFlags...)
+	options := mountFlags
 	if readonly {
 		options = append(options, "ro")
 	}
-	if err := s.mounter.Mount(sourcePath, targetPath, "", options); err != nil {
+
+	// Mount
+	volumeType, err := s.mounter.GetFileType(sourcePath)
+	if err != nil {
+		return fmt.Errorf("failed to get volume type: %v", err)
+	}
+
+	switch volumeType {
+	case mount.FileTypeBlockDev:
+		err = s.mounter.FormatAndMount(sourcePath, targetPath, fsType, options)
+	case mount.FileTypeFile, mount.FileTypeDirectory:
+		options = append([]string{"bind"}, options...)
+		err = s.mounter.Mount(sourcePath, targetPath, "", options)
+	default:
+		err = fmt.Errorf("unsupported volume source type: %v", volumeType)
+	}
+
+	if err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (s *Server) nodePublishBlock(sourcePath, linkFile string) error {
+func (s *Server) doSymlink(sourcePath, linkFile string) error {
 	mapPath := filepath.Dir(linkFile)
 	if !filepath.IsAbs(mapPath) {
 		return fmt.Errorf("The map path should be absolute: map path: %s", mapPath)
