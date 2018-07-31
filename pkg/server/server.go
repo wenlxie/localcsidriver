@@ -943,10 +943,14 @@ func backendKeyFromVolumeID(inputID string) (backend string, err error) {
 // doUnmount tries to unmount given path,
 // and remove the path directly if it's not a mountpoint.
 func (s *Server) doUnmount(mountPath string) error {
-	_, err := os.Stat(mountPath)
-	corruptedMnt := isCorruptedMnt(err)
-	if err != nil && !corruptedMnt {
+	pathExists, pathErr := volumeutil.PathExists(mountPath)
+	if !pathExists {
 		log.Printf("Unmount skipped because path does not exist: %v", mountPath)
+		return nil
+	}
+	corruptedMnt := isCorruptedMnt(pathErr)
+	if pathErr != nil && !corruptedMnt {
+		return fmt.Errorf("Error checking path: %v", pathErr)
 	}
 
 	if !corruptedMnt {
