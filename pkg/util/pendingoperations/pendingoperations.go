@@ -17,7 +17,6 @@ limitations under the License.
 package pendingoperations
 
 import (
-	"fmt"
 	"sync"
 
 	"google.golang.org/grpc/codes"
@@ -66,8 +65,8 @@ type PendingOperations interface {
 	HasPendingOperation(volumeName string) (*Operation, bool)
 }
 
-// NewPendingOperations returns a new instance of PendingOperations.
-func NewPendingOperations() PendingOperations {
+// New returns a new instance of PendingOperations.
+func New() PendingOperations {
 	g := &pendingOperations{
 		operations: map[string]*Operation{},
 	}
@@ -102,7 +101,7 @@ func (po *pendingOperations) Run(volumeName string, operation *Operation) error 
 			defer operation.CompleteFunc(&opErr)
 		}
 		// Handle panic, if any, from operationFunc()
-		defer k8sRuntime.RecoverFromPanic(&detailedErr)
+		defer k8sRuntime.RecoverFromPanic(&opErr)
 		opErr = operation.OperationFunc()
 		errCh <- opErr
 

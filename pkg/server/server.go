@@ -12,6 +12,7 @@ import (
 	"github.com/kubernetes-csi/localcsidriver/pkg/backend"
 	"github.com/kubernetes-csi/localcsidriver/pkg/config"
 	"github.com/kubernetes-csi/localcsidriver/pkg/util"
+	"github.com/kubernetes-csi/localcsidriver/pkg/util/pendingoperations"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -34,6 +35,7 @@ const VolumePathKey = "volume-path"
 const HostnameKey = "kubernetes.io/hostname"
 
 type Server struct {
+	pendingOperations pendingoperations.PendingOperations
 	backends map[string]backend.StorageBackend
 	// Key to select backend when performing volume creation.
 	// It should be specified in StorageClass as parameters.
@@ -53,6 +55,7 @@ type Server struct {
 // are performed in order to keep backends (volume groups for LVM) up-to-date.
 func New(config *config.DriverConfig) (*Server, error) {
 	s := &Server{
+		pendingOperations:    pendingoperations.New(),
 		defaultVolumeSize:    config.DefaultVolumeSize,
 		supportedFilesystems: map[string]string{},
 		backends:             map[string]backend.StorageBackend{},
@@ -210,73 +213,73 @@ func (s *Server) CreateVolume(
 			err)
 	}
 
-	// Check whether a volume with the given name already exists.
 	volumeId := storageBackend.Name() + "_" + request.GetName()
-	log.Printf("Determining whether volume with id=%v already exists", volumeId)
 
-	if vol, err := storageBackend.LookupVolume(volumeId); err == nil {
-		log.Printf("Volume %s already exists.", request.GetName())
-		// The volume already exists. Determine whether or not the
-		// existing volume satisfies the request. If so, return a
-		// successful response. If not, return ErrVolumeAlreadyExists.
-		if err := s.validateExistingVolume(vol, request); err != nil {
+	// Check if there is pending operation for the volume.
+	if existingOp, opExist := s.pendingOperations.HasPendingOperation(volumeId); opExist {
+		return nil, pendingoperations.NewAlreadyExistsError(volumeId, existingOp.Type)
+	}
+
+	createOperation := func() error {
+		// Check whether a volume with the given name already exists.
+		log.Printf("Determining whether volume with id=%v already exists", volumeId)
+
+		if vol, err := storageBackend.LookupVolume(volumeId); err == nil {
+			log.Printf("Volume %s already exists.", request.GetName())
+			// The volume already exists. Determine whether or not the
+			// existing volume satisfies the request. If so, return a
+			// successful response. If not, return ErrVolumeAlreadyExists.
+			if err := s.validateExistingVolume(vol, request); err != nil {
+				return err
+			}
+		}
+		log.Printf("Volume with id=%v does not already exist", volumeId)
+		// Determine the capacity.
+		size := s.defaultVolumeSize
+		if capacityRange := request.GetCapacityRange(); capacityRange != nil {
+			bytesFree, err := storageBackend.BytesFree()
+			if err != nil {
+				return status.Errorf(
+					codes.Internal,
+					"Error in BytesFree: %v",
+					err)
+			}
+			log.Printf("BytesFree: %v", bytesFree)
+
+			// Round up to GiB
+			sizeInRequest := uint64(volumeutil.RoundUpSize(capacityRange.GetRequiredBytes(), volumeutil.GIB)*volumeutil.GIB)
+			if sizeInRequest >= size {
+				size = sizeInRequest
+			}
+			// Check whether there is enough free space available.
+			if bytesFree < size {
+				return ErrInsufficientCapacity
+			}
+		}
+		log.Printf("Creating volume id=%v, size=%v", volumeId, size)
+		_, err = storageBackend.CreateVolume(volumeId, size)
+		if err != nil {
+			return status.Errorf(
+				codes.Internal,
+				"Error in CreateVolume: %v",
+				err)
+		}
+
+		return nil
+	}
+
+	// Perform create operation.
+	if err := s.pendingOperations.Run(volumeId, &pendingoperations.Operation{
+		OperationFunc: createOperation,
+		Type: pendingoperations.CreateOperation}); err != nil {
 			return nil, err
-		}
-
-		volPath, err := vol.Path()
-		if err != nil {
-			return nil, status.Errorf(
-				codes.Internal,
-				"Error getting volume path: %v",
-				err)
-		}
-		response := &csi.CreateVolumeResponse{
-			Volume: &csi.Volume{
-				CapacityBytes: int64(vol.SizeInBytes()),
-				Id:            vol.Name(),
-				Attributes: map[string]string{
-					VolumePathKey: volPath,
-				},
-				AccessibleTopology: []*csi.Topology{
-					{
-						Segments: map[string]string{
-							HostnameKey: s.nodeName,
-						},
-					},
-				},
-			},
-		}
-		return response, nil
 	}
-	log.Printf("Volume with id=%v does not already exist", volumeId)
-	// Determine the capacity.
-	size := s.defaultVolumeSize
-	if capacityRange := request.GetCapacityRange(); capacityRange != nil {
-		bytesFree, err := storageBackend.BytesFree()
-		if err != nil {
-			return nil, status.Errorf(
-				codes.Internal,
-				"Error in BytesFree: %v",
-				err)
-		}
-		log.Printf("BytesFree: %v", bytesFree)
 
-		// Round up to GiB
-		sizeInRequest := uint64(volumeutil.RoundUpSize(capacityRange.GetRequiredBytes(), volumeutil.GIB)*volumeutil.GIB)
-		if sizeInRequest >= size {
-			size = sizeInRequest
-		}
-		// Check whether there is enough free space available.
-		if bytesFree < size {
-			return nil, ErrInsufficientCapacity
-		}
-	}
-	log.Printf("Creating volume id=%v, size=%v", volumeId, size)
-	vol, err := storageBackend.CreateVolume(volumeId, size)
+	vol, err := storageBackend.LookupVolume(volumeId)
 	if err != nil {
 		return nil, status.Errorf(
 			codes.Internal,
-			"Error in CreateVolume: %v",
+			"Error getting volume: %v",
 			err)
 	}
 
@@ -284,7 +287,7 @@ func (s *Server) CreateVolume(
 	if err != nil {
 		return nil, status.Errorf(
 			codes.Internal,
-			"Error in Getting volume path: %v",
+			"Error in getting volume path: %v",
 			err)
 	}
 
@@ -399,46 +402,64 @@ func (s *Server) DeleteVolume(
 	}
 	id := request.GetVolumeId()
 
-	// Get Backend via volume ID
-	storageBackend, err := s.getBackendFromVolumeID(id)
-	if err != nil {
-		return nil, status.Errorf(
-			codes.Internal,
-			"Error getting storage backend: %v",
-			err)
+	// Check if there is pending operation for the volume.
+	if existingOp, opExist := s.pendingOperations.HasPendingOperation(id); opExist {
+		return nil, pendingoperations.NewAlreadyExistsError(id, existingOp.Type)
 	}
 
-	log.Printf("Looking up volume with id=%v", id)
-	vol, err := storageBackend.LookupVolume(id)
-	if err != nil {
-		// It is idempotent to succeed if a volume is not found.
-		response := &csi.DeleteVolumeResponse{}
-		return response, nil
-	}
-	/*
-		log.Printf("Determining volume path")
-		path, err := vol.Path()
+	deleteOperation := func() error {
+		// Get Backend via volume ID
+		storageBackend, err := s.getBackendFromVolumeID(id)
 		if err != nil {
-			return nil, status.Errorf(
+			return status.Errorf(
 				codes.Internal,
-				"Error in Path(): %v",
+				"Error getting storage backend: %v",
 				err)
 		}
-		log.Printf("Cleaning up data on device %v", path)
-		if err := util.CleanupDataOnDevice(path); err != nil {
-			return nil, status.Errorf(
+
+		log.Printf("Looking up volume with id=%v", id)
+		vol, err := storageBackend.LookupVolume(id)
+		if err != nil {
+			return status.Errorf(
 				codes.Internal,
-				"Cannot cleanup data from device: %v",
+				"Error getting volume: %v",
 				err)
 		}
-	*/
-	log.Printf("Removing volume")
-	if err := storageBackend.DeleteVolume(vol.Name()); err != nil {
-		return nil, status.Errorf(
-			codes.Internal,
-			"Failed to remove volume: %v",
-			err)
+		/*
+			log.Printf("Determining volume path")
+			path, err := vol.Path()
+			if err != nil {
+				return nil, status.Errorf(
+					codes.Internal,
+					"Error in Path(): %v",
+					err)
+			}
+			log.Printf("Cleaning up data on device %v", path)
+			if err := util.CleanupDataOnDevice(path); err != nil {
+				return nil, status.Errorf(
+					codes.Internal,
+					"Cannot cleanup data from device: %v",
+					err)
+			}
+		*/
+		log.Printf("Removing volume")
+		if err := storageBackend.DeleteVolume(vol.Name()); err != nil {
+			return status.Errorf(
+				codes.Internal,
+				"Failed to remove volume: %v",
+				err)
+		}
+
+		return nil
 	}
+
+	// Perform delete operation.
+	if err := s.pendingOperations.Run(id, &pendingoperations.Operation{
+		OperationFunc: deleteOperation,
+		Type: pendingoperations.DeleteOperation}); err != nil {
+		return nil, err
+	}
+
 	response := &csi.DeleteVolumeResponse{}
 	return response, nil
 }
@@ -682,36 +703,53 @@ func (s *Server) NodeStageVolume(
 		return nil, err
 	}
 
-	// As path of static volumes cannot be found via storage backend,
-	// we'll need to specify path as volume attributes.
-	volPath := request.GetVolumeAttributes()[VolumePathKey]
-	targetPath := request.GetStagingTargetPath()
-	readonly := request.GetVolumeCapability().GetAccessMode().GetMode() == csi.VolumeCapability_AccessMode_SINGLE_NODE_READER_ONLY
-	mountFlags := request.GetVolumeCapability().GetMount().GetMountFlags()
+	id := request.GetVolumeId()
 
-	fsType := ""
-	if mnt := request.GetVolumeCapability().GetMount(); mnt != nil {
-		fsType = mnt.GetFsType()
-	}
-	if fsType == "" {
-		fsType = s.supportedFilesystems[""]
+	// Check if there is pending operation for the volume.
+	if existingOp, opExist := s.pendingOperations.HasPendingOperation(id); opExist {
+		return nil, pendingoperations.NewAlreadyExistsError(id, existingOp.Type)
 	}
 
-	switch accessType := request.GetVolumeCapability().GetAccessType().(type) {
-	case *csi.VolumeCapability_Block:
-		if err := s.doSymlink(volPath, targetPath); err != nil {
-			return nil, status.Error(codes.Internal, err.Error())
+	stageOperation := func() error {
+		// As path of static volumes cannot be found via storage backend,
+		// we'll need to specify path as volume attributes.
+		volPath := request.GetVolumeAttributes()[VolumePathKey]
+		targetPath := request.GetStagingTargetPath()
+		readonly := request.GetVolumeCapability().GetAccessMode().GetMode() == csi.VolumeCapability_AccessMode_SINGLE_NODE_READER_ONLY
+		mountFlags := request.GetVolumeCapability().GetMount().GetMountFlags()
+
+		fsType := ""
+		if mnt := request.GetVolumeCapability().GetMount(); mnt != nil {
+			fsType = mnt.GetFsType()
 		}
-	case *csi.VolumeCapability_Mount:
-		if err := s.doMount(volPath, targetPath, fsType, readonly, mountFlags); err != nil {
-			return nil, status.Error(codes.Internal, err.Error())
+		if fsType == "" {
+			fsType = s.supportedFilesystems[""]
 		}
-	default:
-		return nil, status.Errorf(
-			codes.OutOfRange,
-			"unknown access_type: %v",
-			accessType,
-		)
+
+		switch accessType := request.GetVolumeCapability().GetAccessType().(type) {
+		case *csi.VolumeCapability_Block:
+			if err := s.doSymlink(volPath, targetPath); err != nil {
+				return status.Error(codes.Internal, err.Error())
+			}
+		case *csi.VolumeCapability_Mount:
+			if err := s.doMount(volPath, targetPath, fsType, readonly, mountFlags); err != nil {
+				return status.Error(codes.Internal, err.Error())
+			}
+		default:
+			return status.Errorf(
+				codes.OutOfRange,
+				"unknown access_type: %v",
+				accessType,
+			)
+		}
+		return nil
+	}
+
+	// Perform stage operation.
+	if err := s.pendingOperations.Run(id, &pendingoperations.Operation{
+		OperationFunc: stageOperation,
+		Type: pendingoperations.NodeStageOperation}); err != nil {
+		return nil, err
 	}
 
 	return &csi.NodeStageVolumeResponse{}, nil
@@ -724,8 +762,26 @@ func (s *Server) NodeUnstageVolume(
 		return nil, err
 	}
 
-	if err := s.doUnmount(request.GetStagingTargetPath()); err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
+	id := request.GetVolumeId()
+
+	// Check if there is pending operation for the volume.
+	if existingOp, opExist := s.pendingOperations.HasPendingOperation(id); opExist {
+		return nil, pendingoperations.NewAlreadyExistsError(id, existingOp.Type)
+	}
+
+	unstageOperation := func() error {
+		if err := s.doUnmount(request.GetStagingTargetPath()); err != nil {
+			return status.Error(codes.Internal, err.Error())
+		}
+
+		return nil
+	}
+
+	// Perform unstage operation.
+	if err := s.pendingOperations.Run(id, &pendingoperations.Operation{
+		OperationFunc: unstageOperation,
+		Type: pendingoperations.NodeUnstageOperation}); err != nil {
+		return nil, err
 	}
 
 	return &csi.NodeUnstageVolumeResponse{}, nil
@@ -750,29 +806,47 @@ func (s *Server) NodePublishVolume(
 		return nil, err
 	}
 
-	sourcePath := request.GetStagingTargetPath()
-	targetPath := request.GetTargetPath()
-	readonly := request.GetVolumeCapability().GetAccessMode().GetMode() == csi.VolumeCapability_AccessMode_SINGLE_NODE_READER_ONLY
-	readonly = readonly || request.GetReadonly()
-	mountFlags := request.GetVolumeCapability().GetMount().GetMountFlags()
+	id := request.GetVolumeId()
 
-	switch accessType := request.GetVolumeCapability().GetAccessType().(type) {
-	case *csi.VolumeCapability_Block:
-		if err := s.doSymlink(sourcePath, targetPath); err != nil {
-			return nil, status.Error(codes.Internal, err.Error())
+	// Check if there is pending operation for the volume.
+	if existingOp, opExist := s.pendingOperations.HasPendingOperation(id); opExist {
+		return nil, pendingoperations.NewAlreadyExistsError(id, existingOp.Type)
+	}
+
+	publishOperation := func() error {
+		sourcePath := request.GetStagingTargetPath()
+		targetPath := request.GetTargetPath()
+		readonly := request.GetVolumeCapability().GetAccessMode().GetMode() == csi.VolumeCapability_AccessMode_SINGLE_NODE_READER_ONLY
+		readonly = readonly || request.GetReadonly()
+		mountFlags := request.GetVolumeCapability().GetMount().GetMountFlags()
+
+		switch accessType := request.GetVolumeCapability().GetAccessType().(type) {
+		case *csi.VolumeCapability_Block:
+			if err := s.doSymlink(sourcePath, targetPath); err != nil {
+				return status.Error(codes.Internal, err.Error())
+			}
+		case *csi.VolumeCapability_Mount:
+			// We'll only need bind mount for NodePublishVolume,
+			// so don't care about fstype here.
+			if err := s.doMount(sourcePath, targetPath, "", readonly, mountFlags); err != nil {
+				return status.Error(codes.Internal, err.Error())
+			}
+		default:
+			return status.Errorf(
+				codes.OutOfRange,
+				"unknown access_type: %v",
+				accessType,
+			)
 		}
-	case *csi.VolumeCapability_Mount:
-		// We'll only need bind mount for NodePublishVolume,
-		// so don't care about fstype here.
-		if err := s.doMount(sourcePath, targetPath, "", readonly, mountFlags); err != nil {
-			return nil, status.Error(codes.Internal, err.Error())
-		}
-	default:
-		return nil, status.Errorf(
-			codes.OutOfRange,
-			"unknown access_type: %v",
-			accessType,
-		)
+
+		return nil
+	}
+
+	// Perform publish operation.
+	if err := s.pendingOperations.Run(id, &pendingoperations.Operation{
+		OperationFunc: publishOperation,
+		Type: pendingoperations.NodePublishOperation}); err != nil {
+		return nil, err
 	}
 
 	return &csi.NodePublishVolumeResponse{}, nil
@@ -854,9 +928,27 @@ func (s *Server) NodeUnpublishVolume(
 		return nil, err
 	}
 
-	err := s.doUnmount(request.GetTargetPath())
-	if err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
+	id := request.GetVolumeId()
+
+	// Check if there is pending operation for the volume.
+	if existingOp, opExist := s.pendingOperations.HasPendingOperation(id); opExist {
+		return nil, pendingoperations.NewAlreadyExistsError(id, existingOp.Type)
+	}
+
+	unpublishOperation := func() error {
+		err := s.doUnmount(request.GetTargetPath())
+		if err != nil {
+			return status.Error(codes.Internal, err.Error())
+		}
+
+		return nil
+	}
+
+	// Perform unpublish operation.
+	if err := s.pendingOperations.Run(id, &pendingoperations.Operation{
+		OperationFunc: unpublishOperation,
+		Type: pendingoperations.NodeUnpublishOperation}); err != nil {
+		return nil, err
 	}
 
 	response := &csi.NodeUnpublishVolumeResponse{}
