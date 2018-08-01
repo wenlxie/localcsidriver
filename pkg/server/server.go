@@ -224,7 +224,8 @@ func (s *Server) CreateVolume(
 		// Check whether a volume with the given name already exists.
 		log.Printf("Determining whether volume with id=%v already exists", volumeId)
 
-		if vol, err := storageBackend.LookupVolume(volumeId); err == nil {
+		vol, err := storageBackend.LookupVolume(volumeId)
+		if err == nil {
 			log.Printf("Volume %s already exists.", request.GetName())
 			// The volume already exists. Determine whether or not the
 			// existing volume satisfies the request. If so, return a
@@ -232,7 +233,17 @@ func (s *Server) CreateVolume(
 			if err := s.validateExistingVolume(vol, request); err != nil {
 				return err
 			}
+
+			return nil
 		}
+		if !isVolumeNotFoundError(err) {
+			// Get unexpected error
+			return status.Errorf(
+				codes.Internal,
+				"Error getting volume: %v",
+				err)
+		}
+
 		log.Printf("Volume with id=%v does not already exist", volumeId)
 		// Determine the capacity.
 		size := s.defaultVolumeSize
@@ -419,7 +430,10 @@ func (s *Server) DeleteVolume(
 
 		log.Printf("Looking up volume with id=%v", id)
 		vol, err := storageBackend.LookupVolume(id)
-		if err != nil {
+		if isVolumeNotFoundError(err) {
+			// Volume has already been removed
+			return nil
+		} else if err != nil {
 			return status.Errorf(
 				codes.Internal,
 				"Error getting volume: %v",
@@ -1092,4 +1106,14 @@ func isCorruptedMnt(err error) bool {
 		underlyingError = pe.Err
 	}
 	return underlyingError == syscall.ENOTCONN || underlyingError == syscall.ESTALE
+}
+
+// volume not found error that returned from the backends should follow the format.
+func isVolumeNotFoundError(err error) bool {
+	suffix := "volume not found"
+	if err != nil && strings.HasSuffix(err.Error(), suffix) {
+		return true
+	}
+
+	return false
 }
