@@ -19,9 +19,9 @@ package pendingoperations
 import (
 	"sync"
 
+	"github.com/kubernetes-csi/localcsidriver/pkg/util"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	k8sRuntime "k8s.io/apimachinery/pkg/util/runtime"
 )
 
 // Operation contains the operation that is created as well as
@@ -94,14 +94,14 @@ func (po *pendingOperations) Run(volumeName string, operation *Operation) error 
 	errCh := make(chan error, 1)
 	go func() (opErr error) {
 		// Handle unhandled panics (very unlikely)
-		defer k8sRuntime.HandleCrash()
+		defer util.HandleCrash()
 		// Handle completion
 		defer po.operationComplete(volumeName)
 		if operation.CompleteFunc != nil {
 			defer operation.CompleteFunc(&opErr)
 		}
 		// Handle panic, if any, from operationFunc()
-		defer k8sRuntime.RecoverFromPanic(&opErr)
+		defer util.RecoverFromPanic(&opErr)
 		opErr = operation.OperationFunc()
 		errCh <- opErr
 
