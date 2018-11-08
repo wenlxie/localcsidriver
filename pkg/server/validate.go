@@ -135,8 +135,10 @@ func (s *Server) validateCapacityRange(capacityRange *csi.CapacityRange) error {
 	if capacityRange.GetRequiredBytes() == 0 && capacityRange.GetLimitBytes() == 0 {
 		return ErrCapacityRangeUnspecified
 	}
-	if capacityRange.GetRequiredBytes() > capacityRange.GetLimitBytes() {
-		return ErrCapacityRangeInvalidSize
+	if capacityRange.GetLimitBytes() != 0 {
+		if capacityRange.GetRequiredBytes() > capacityRange.GetLimitBytes() {
+			return ErrCapacityRangeInvalidSize
+		}
 	}
 	return nil
 }
