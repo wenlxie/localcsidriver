@@ -665,7 +665,7 @@ func ListPhysicalVolumes() ([]*PhysicalVolume, error) {
 // LookupPhysicalVolume returns a physical volume with the given name.
 func LookupPhysicalVolume(name string) (*PhysicalVolume, error) {
 	result := new(pvsOutput)
-	if err := run("pvs", result, "--options=pv_name", name); err != nil {
+	if err := run("pvs", result, "--options=pv_name,vg_name", name); err != nil {
 		if IsPhysicalVolumeNotFound(err) {
 			return nil, ErrPhysicalVolumeNotFound
 		}
