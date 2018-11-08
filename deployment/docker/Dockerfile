@@ -24,4 +24,4 @@ RUN sed -i.save -e "s#udev_sync = 1#udev_sync = 0#" -e "s#udev_rules = 1#udev_ru
 
 ADD local-csi-driver /local-csi-driver
 ADD scripts /scripts
-ENTRYPOINT ["local-csi-driver"]
+ENTRYPOINT ["/local-csi-driver"]
