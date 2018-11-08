@@ -33,6 +33,10 @@ func main() {
 		sock = sock[len("unix://"):]
 	}
 	// Setup socket listener
+	addr := "/" + sock
+	if err := os.Remove(addr); err != nil && !os.IsNotExist(err) {
+		log.Fatalf("Failed to remove %s, error: %s", addr, err.Error())
+	}
 	lis, err := net.Listen("unix", sock)
 	if err != nil {
 		log.Fatalf("Failed to listen: %v", err)
