@@ -972,12 +972,21 @@ func (s *Server) NodeUnpublishVolume(
 func (s *Server) NodeGetId(
 	ctx context.Context,
 	request *csi.NodeGetIdRequest) (*csi.NodeGetIdResponse, error) {
-	log.Printf("NodeGetId not supported")
-	return nil, ErrCallNotImplemented
+
+	nodeId := os.Getenv("NODE_ID")
+	if len(nodeId) == 0 {
+		log.Printf("Env NODE_ID not exist, NodeGetId not supported")
+	}
+	return &csi.NodeGetIdResponse{
+		NodeId : nodeId,
+	}, nil
+
+
 }
 
 func (s *Server) NodeGetInfo(context.Context, *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
 	log.Printf("NodeGetInfo not supported")
+
 	return nil, ErrCallNotImplemented
 }
 
